@@ -1,15 +1,27 @@
 import sys, argparse, os
 import numpy as np
+import random
+import yaml
 
 import torch
+import torch.nn.functional as F
 
 import loss as L
 
 from torch.utils.tensorboard import SummaryWriter
+from dataset_utae import dataloader_args_utae, load_dataset_utae
 from utils import new_log
-from dataloading import get_dataloaders
+#from utils.plot_utils import *
+
+from dataset import load_dataset, dataloader_args
 from models import get_model
+
+# from utils import metric_flatten, saferm
+from loss import l1_loss_weight, l2_loss, l1_loss, bay_loss
 #from torchsummary import summary
+
+from evaluation import predict_batch, predict_event, mae_event
+from evaluation import plot_maes, multiboxplot, plot_answer_sample, boxplot_mae
 
 if 'ipykernel' in sys.modules:
     from tqdm import tqdm_notebook as tqdm
@@ -26,34 +38,25 @@ def str2bool(v):
     else:
         raise argparse.ArgumentTypeError('Boolean value expected.')
 
-### Catchment settings
-catchment_kwargs = {}
-catchment_kwargs["num"] = ["F_01", "F_02"]#, "F_11_max", "F_13_max", "F_14_max", "S_01_max", "S_02_max", "S_03_max", "S_04_max", "S_06_max"]#"709"
-#catchment_kwargs['num'] = "709_max"
-catchment_kwargs['val'] = ["F_12", "S_05"] # in case of multi dataset
-catchment_kwargs["tau"] = 0.5
-catchment_kwargs["timestep"]= 1      # for timestep >1 use CNN rolling or Unet
-catchment_kwargs["sample_type"]="single"
-catchment_kwargs["dim_patch"]=256
-catchment_kwargs["fix_indexes"]=False
-catchment_kwargs["border_size"] = 0
-catchment_kwargs["normalize_output"] = False
-catchment_kwargs["use_diff_dem"] = False
-catchment_kwargs["num_patch"] = 10      # number of patches to generate from a timestep
-catchment_kwargs["predict_ahead"] = 5  # how many timesteps ahead to predict; default value 0 for just predicting the next timestep
-catchment_kwargs["ts_out"] = 0 
-
 class DevelopingSuite(object):
 
-    def __init__(self, args):
+    def __init__(self, args, catchment_kwargs):
 
         self.args = args
         
-        self.dataloaders ={}
-        self.dataloaders["train"], self.dataloaders["val"] = get_dataloaders(args, catchment_kwargs)
+        # from developing_suite.py file
+        #self.dataloaders, self.data_stats =  get_dataloaders(args)
+        # added by Pree 
+        self.dataloaders ={} 
+        if self.args.model == "utae" or self.args.model == "unet3d":
+            train, val = load_dataset_utae(catchment_kwargs)
+            self.dataloaders["train"], self.dataloaders["val"] = dataloader_args_utae(train, val, catchment_num=catchment_kwargs["num"], batch_size=args.batch_size)
+        else:
+            train, val = load_dataset(catchment_kwargs)
+            self.dataloaders["train"], self.dataloaders["val"] = dataloader_args(train, val, catchment_num=catchment_kwargs["num"], batch_size=args.batch_size)
 
         self.device = torch.device("cuda" if torch.cuda.is_available() and args.device=="cuda" else "cpu")
-        self.model = get_model(args,  catchment_kwargs)
+        self.model = get_model(args, catchment_kwargs)
         self.i = 0
         self.model.to(self.device)
         if args.resume is not None:
@@ -85,49 +88,8 @@ class DevelopingSuite(object):
         self.val_stats = {}
         self.val_stats["best_optimization_loss"] = np.nan
         self.val_stats["optimization_loss"] = np.nan
-        ##save best l1
-        if args.if_bayesian == True and args.save_best_l1 == True:
-            self.val_stats["best_l1_loss"] = np.nan        
 
     def train_and_eval(self):
-
-        if self.args.l1_prior == True and self.args.if_bayesian == True:
-            def create_weight(conv_layer, dist):
-                t = dist.sample((conv_layer.weight.view(-1).size())).reshape(conv_layer.weight.size())
-                with torch.no_grad():
-                    conv_layer.weight.add_( t.to(self.device))
-
-            laplacian_dist = torch.distributions.laplace.Laplace(loc=torch.tensor([0.]), scale=torch.tensor([args.prior_sc]))
-            normal_dist = torch.distributions.Normal(loc=torch.tensor([0.]), scale=torch.tensor([1.0]))
-
-            conv_layers =[
-                  self.model._modules['inc']._modules['double_conv']._modules['0'],
-                  self.model._modules['inc']._modules['double_conv']._modules['3'],
-                  self.model._modules['down1']._modules['maxpool_conv']._modules['1']._modules['double_conv']._modules['0'],
-                  self.model._modules['down1']._modules['maxpool_conv']._modules['1']._modules['double_conv']._modules['3'],
-                  self.model._modules['down2']._modules['maxpool_conv']._modules['1']._modules['double_conv']._modules['0'],
-                  self.model._modules['down2']._modules['maxpool_conv']._modules['1']._modules['double_conv']._modules['3'],
-                  self.model._modules['down3']._modules['maxpool_conv']._modules['1']._modules['double_conv']._modules['0'],
-                  self.model._modules['down3']._modules['maxpool_conv']._modules['1']._modules['double_conv']._modules['3'],
-                  self.model._modules['down4']._modules['maxpool_conv']._modules['1']._modules['double_conv']._modules['0'],
-                  self.model._modules['down4']._modules['maxpool_conv']._modules['1']._modules['double_conv']._modules['3'],
-                  self.model._modules['up1']._modules['conv']._modules['double_conv']._modules['0'],
-                  self.model._modules['up1']._modules['conv']._modules['double_conv']._modules['3'],
-                  self.model._modules['up2']._modules['conv']._modules['double_conv']._modules['0'],
-                  self.model._modules['up2']._modules['conv']._modules['double_conv']._modules['3'],
-                  self.model._modules['up3']._modules['conv']._modules['double_conv']._modules['0'],
-                  self.model._modules['up3']._modules['conv']._modules['double_conv']._modules['3'],
-                  self.model._modules['up4']._modules['conv']._modules['double_conv']._modules['0'],
-                  self.model._modules['up4']._modules['conv']._modules['double_conv']._modules['3'],
-                  self.model._modules['m_outc1'],
-                  self.model._modules['m_outc2'],
-                  self.model._modules['v_outc1'],
-                  self.model._modules['v_outc2']
-                        ] 
-        
-            for i in range(len(conv_layers)):
-                create_weight(conv_layers[i],laplacian_dist)  
-
 
         with tqdm(range(0,self.args.epochs),leave=True) as tnr:
             tnr.set_postfix(training_loss= np.nan, validation_loss= np.nan,best_validation_loss = np.nan)
@@ -270,11 +232,8 @@ class DevelopingSuite(object):
         raise NotImplementedError
 
     def save_model(self):
-        if args.if_bayesian == True:
-            torch.save(self.model.state_dict(), os.path.join(self.experiment_folder, "ensemble_" + str(args.model_number) + ".pth.tar"))
-        else:
-            torch.save(self.model.state_dict(), os.path.join(self.experiment_folder,"model.pth.tar"))
-
+        torch.save(self.model.state_dict(), os.path.join(self.experiment_folder,"model.pth.tar"))
+        
     def resume(self,path):
         if not os.path.isfile(path):
             raise RuntimeError("=> no checkpoint found at '{}'".format(path))
@@ -320,10 +279,10 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser(description="training script")
 
     #### general parameters #####################################################
-    parser.add_argument('--tag', default="mask",type=str)
+    parser.add_argument('--tag', default="temp",type=str)
     #parser.add_argument('--tag', default="__",type=str)
     parser.add_argument("--device",default="cuda",type=str,choices=["cuda", "cpu"])
-    parser.add_argument("--save-dir",default="/scratch2/flood_sim2/data/checkpoints/", 
+    parser.add_argument("--save-dir",default="/scratch2/ml_flood/data/checkpoints/", 
                         help="Path to directory where models and logs should be saved saved !! this folder must already exist !!")
     parser.add_argument("--logstep-train", default=10,type=int,
                         help="iterations step for training log")
@@ -333,9 +292,9 @@ if __name__ == '__main__':
     parser.add_argument('--mode',default="only_train",type=str,choices=["None","train","test","train_and_test", "only_train"],help="mode to be run")
 
     #### data parameters ##########################################################
-    parser.add_argument("--data",default="multi",type=str,choices=["toy", "709", "684", "multi"],help="dataset selection")
+    parser.add_argument("--data",default="709",type=str,choices=["toy", "709", "684", "multi"],help="dataset selection")
     parser.add_argument("--datafolder",type=str,help="root directory of the dataset")
-    parser.add_argument("--workers", type=int, default=0,metavar="N",help="dataloader threads")
+    parser.add_argument("--workers", type=int, default=4,metavar="N",help="dataloader threads")
     parser.add_argument("--batch-size", type=int, default=8)
 
     #### optimizer parameters #####################################################
@@ -349,35 +308,28 @@ if __name__ == '__main__':
     parser.add_argument('--lr-step', type=int, default=350,help=' number of epochs between decreasing steps applies to lr-scheduler in [step, exp]')
     parser.add_argument('--lr-gamma', type=float, default=0.1,help='decrease rate')
 
-    #### model parameters #####################################################
-    parser.add_argument("--model", default='unet_bay', type=str,help="model to run: 'cnn', 'unet', 'utae', 'unet3d'")
-    parser.add_argument("--loss", default="lnll", type=str, help="loss ['MSE', 'L1', 'L1_upd', 'lnll'] ")
-    parser.add_argument("--task",default="wd_ts",type=str,choices=["wd_ts", "max_depth"],help="select b/w task predicting water depth for next timesteps (wd_ts) or max depth for rainfall events")
-    
-    #### bayesian training parameters #########################################
-    parser.add_argument("--if_bayesian",default=True,type=bool,choices=[True,False],help="training using bayesian predictive uncertainty") 
-    parser.add_argument('--num_models', type=int, default=5)
-    parser.add_argument("--model_number",default="model1",type=str,help="ensemble model number training")
-    parser.add_argument('--seed', type=int, default=27,help="model1: 19, model2: 27, model3: 37, model4: 45, model5: 73")
-    
-    ## saving model on l1 loss if bayesian
-    parser.add_argument('--save_best_l1',default=False,type=bool,choices=[True,False],help="saving model based on best l1 loss")    
-    ## laplace prior
-    parser.add_argument('--l1_prior',default=True,type=bool,choices=[True,False],help="saving model based on best l1 loss")
-    ## prior scale value
-    parser.add_argument("--prior_sc", default=0.05,type=float,help="fraction of non-zero elements to accept a patch for training")
-    #parser.add_argument('--exp', type=str, default='exp4',choices=['exp1','exp2', 'exp3', 'exp4'],help='select which experiment to run')
+    #### model parameters #####################################################	
+    parser.add_argument("--model", default='unet3d', type=str,help="model to run: 'cnn', 'unet', 'utae', 'unet3d', 'unet_bay'")
+    parser.add_argument("--loss", default="L1", type=str, help="loss ['MSE', 'L1', 'L1_upd', 'bay_loss'] ")
+    ## training files takes 2 random patches instead of 100 in the normal file. loc: /scratch2/flood_sim/data/709/one_alt/
 
-    ### fix indexes validation ###############################################
+    ### fix indexes validation
     parser.add_argument("--fix_indexes_val", default=False, const=True, nargs='?', type=str2bool,help="select whether patches are generated sequentially (true) or randomly")
-        
+
     #### UTAE #####################################################
     parser.add_argument('--n_head', type=int, default=16)
-
+    
+    parser.add_argument("--catchment_kwargs", default='.exp_yml/default_catchment_kwargs.yml', type=str, 
+                        help="path to catchment kwargs saved in yml file")
+    
+    
     args = parser.parse_args()
     print(args)
     
-    developingSuite = DevelopingSuite(args)
+    with open(args.catchment_kwargs) as file:
+        catchment_kwargs = yaml.full_load(file)
+    
+    developingSuite = DevelopingSuite(args, catchment_kwargs)
 
     developingSuite.train_and_eval()
 

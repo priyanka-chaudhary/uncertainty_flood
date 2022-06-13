@@ -87,19 +87,26 @@ class UNet_bay(nn.Module):
         
     def __init__(self, args, n_classes=1, bilinear=True, border_size=0, timestep = 1, use_diff_dem=False, predict_ahead = 5, ts_out = 0):
         super(UNet_bay, self).__init__()
-        self.use_diff_dem = use_diff_dem
-        self.timestep = timestep
-        self.predict_ahead = predict_ahead
+
+        self.timestep = catchment_kwargs["timestep"]
+        self.use_diff_dem = catchment_kwargs["use_diff_dem"]
+        self.border_size = catchment_kwargs["border_size"]
+        self.predict_ahead = catchment_kwargs["predict_ahead"]
+        self.ts_out = catchment_kwargs["ts_out"]
+        self.n_channels =  self.timestep*3  + self.predict_ahead + (4 if self.use_diff_dem else 0)   #dem, rainfall*timestep, wd*timestep 
+        self.n_classes = n_classes
+        self.bilinear = bilinear
+        self.args = args
 
         if args.task == "wd_ts":
-            self.n_channels =  timestep*3  + self.predict_ahead + (4 if use_diff_dem else 0)   #dem, rainfall*timestep, wd*timestep 
+            self.n_channels =  self.timestep*3  + self.predict_ahead + (4 if self.use_diff_dem else 0)   #dem, rainfall*timestep, wd*timestep 
         else:
             self.n_channels = 26
         
         self.n_classes = n_classes
         self.bilinear = bilinear
-        self.border_size = border_size
         self.args = args
+        
 
         self.inc = DoubleConv(self.n_channels, 64)
         self.down1 = Down(64, 128)
@@ -116,15 +123,15 @@ class UNet_bay(nn.Module):
 
         #bayesian
         self.m_outc1 = nn.Conv2d(64, 16, kernel_size=1)
-        if ts_out:
-            self.m_outc2 = nn.Conv2d(16, ts_out, kernel_size=1)
+        if self.ts_out:
+            self.m_outc2 = nn.Conv2d(16, self.ts_out, kernel_size=1)
         else:
             self.m_outc2 = nn.Conv2d(16, 1, kernel_size=1)
 
         self.v_outc1 = nn.Conv2d(64, 16, kernel_size=1)
         
-        if ts_out:
-            self.v_outc2 = nn.Conv2d(16, ts_out, kernel_size=1)
+        if self.ts_out:
+            self.v_outc2 = nn.Conv2d(16, self.ts_out, kernel_size=1)
         else:
             self.v_outc2 = nn.Conv2d(16, 1, kernel_size=1)
 

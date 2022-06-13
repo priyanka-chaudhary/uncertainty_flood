@@ -71,6 +71,22 @@ def bay_loss(predictions, target, mask):
     loss = loss.sum()/(torch.sum(mask.float()))
     return loss   # comput the mean only considering elemnts in the mask
 
+
+def bay_loss_ts_out(predictions, target, local_mask):
+    '''
+    Loss for ts_out
+    '''
+    mu, sigma = predictions['y_pred'], predictions['sigma'] 
+    sigma = torch.sqrt(sigma)
+    dist = torch.distributions.normal.Normal(mu, sigma)   # create normal distribution with the parameters: mean and standard deviation of the distribution
+    loss = -dist.log_prob(target)   # call the log_prob function of the true value  
+    a = target > 0.2
+    print(target.shape)
+    loss[a] = loss[a] * 4
+    loss = loss.sum()/(torch.sum(local_mask.float()))/3
+    return loss
+
+
 def lnll(predictions, target, mask, eps=1e-8):
     ## laplacian negative log likelihood loss
     ## with mean with data elements from mask
@@ -122,6 +138,8 @@ def get_loss(self, sample, output):
         loss = lnll(output, sample["gt"], sample["mask"]) 
     elif self.args.loss == "exp_loss":
         loss = exp_loss(output["y_pred"], sample["gt"], sample["mask"])   
+    elif self.args.loss == "bay_loss_ts_out":
+        loss = bay_loss(output, sample["gt"], sample["mask"])  
     else:
         raise NotImplementedError
 

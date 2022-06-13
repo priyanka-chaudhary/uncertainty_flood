@@ -304,7 +304,7 @@ def predict_dataset(model, dataset, start_ts=None, ar = True):
     return  predictions_ag
 
 
-def predict_event(model, dataset, event_num, arch, start_ts=None, ar = True, T = None):
+def predict_event(model, dataset, event_num, arch, start_ts=None, ar = True, T = None, ts_out = 0):
     """
     Predict a full event.
     
@@ -338,7 +338,7 @@ def predict_event(model, dataset, event_num, arch, start_ts=None, ar = True, T =
 
     for t in tqdm(range(T)):
         if arch == "unet" or arch == "cnn_roll":   
-            recons_pred_full[t] = predict_next_ts_cnn(dataset, model, xin, rainfall[t:t+timestep+tsh], mask, dem, diff_dem)
+            recons_pred_full[t] = predict_next_ts_cnn(dataset, model, xin, rainfall[t:t+timestep+tsh], mask, dem, diff_dem, ts_out)
         else:
             recons_pred_full[t] = predict_next_ts(dataset, model, xin, rainfall[t:t+timestep+tsh], mask, dem, diff_dem) 
         recons_pred_full[t] = recons_pred_full[t] * mask
@@ -422,7 +422,7 @@ def predict_next_ts(dataset, model, xin, rainfall, mask, dem, diff_dem) :
     return recons_pred
 
 
-def predict_next_ts_cnn(dataset, model, xin, rainfall, mask, dem, diff_dem):
+def predict_next_ts_cnn(dataset, model, xin, rainfall, mask, dem, diff_dem, ts_out):
 
     """Predict the next timestep for unet arch. C x H x W
     C = channels, H = height, W = width
@@ -470,7 +470,11 @@ def predict_next_ts_cnn(dataset, model, xin, rainfall, mask, dem, diff_dem):
             if normalize_output:
                 px, py = y_pred.shape
                 y_pred = xin[-1, x_p+b: x_p+b+ px, y_p+b:y_p + b + py] + unnormalize(y_pred)
-            recons_pred[x_p:x_p2, y_p:y_p2] = y_pred
+            
+            if ts_out:  
+                pred_cnn_ts = pred_cnn_ts.squeeze()[0]
+                
+            recons_pred[x_p:x_p2, y_p:y_p2] = pred_cnn_ts
     
     return recons_pred
 

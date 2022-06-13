@@ -24,7 +24,7 @@ def get_model(args, catchment_kwargs):
         return unet3d.UNet3D(args)
     if args.model == 'unet_bay':
         torch.manual_seed(args.seed)
-        return unet_bay.UNet_bay(args)
+        return unet_bay.UNet_bay(args, catchment_kwargs)
     else:
         raise NotImplementedError
 

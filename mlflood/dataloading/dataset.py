@@ -107,7 +107,7 @@ def build_diff_dem(dem):
 
 class MyCatchment(torch.utils.data.Dataset):
     
-    def __init__(self,  h5file, tau=0.5, upsilon=0, timestep=1, sample_type="single", dim_patch=64, fix_indexes=False, border_size=0, normalize_output = False, use_diff_dem=True, num_patch = 10, predict_ahead = 0):
+    def __init__(self,  h5file, tau=0.5, upsilon=0, timestep=1, sample_type="single", dim_patch=64, fix_indexes=False, border_size=0, normalize_output = False, use_diff_dem=True, num_patch = 10, predict_ahead = 0, ts_out = 0):
         '''
         Initialization
         '''
@@ -121,6 +121,7 @@ class MyCatchment(torch.utils.data.Dataset):
         self.normalize_output = normalize_output
         self.use_diff_dem = use_diff_dem
         self.predict_ahead = predict_ahead
+        self.ts_out = ts_out
 
         print(f"Load file: {h5file}")
         self.h5file = h5py.File(h5file, "r")
@@ -193,8 +194,14 @@ class MyCatchment(torch.utils.data.Dataset):
         self.indexes_t = []
         self.indexes_e = []
         v = 0
+            
         for i, nt in enumerate(self.T_steps):
-            nv = nt-self.timestep - self.predict_ahead
+            if self.ts_out:
+                nv = nt-self.timestep - self.predict_ahead - (self.ts_out - 1)
+            else:
+                nv = nt-self.timestep - self.predict_ahead
+            
+            
             if nv>0:
                 self.indexes_t.append(np.arange(nv))
                 self.indexes_e.append(np.ones([nv], dtype=int)*i)
@@ -242,7 +249,12 @@ class MyCatchment(torch.utils.data.Dataset):
         
         # select input data. based on current index_e, index_t and number of timesteps
         xin = self.waterdepth[index_e][index_t: index_t + self.timestep]
-        xout = self.waterdepth[index_e][index_t + self.timestep + self.predict_ahead]
+        if self.ts_out:
+            # ts_out channels as output - but we will care about the last for the prediction
+            xout = self.waterdepth[index_e][index_t + self.timestep +self.predict_ahead: 
+                                            index_t + self.timestep +self.predict_ahead + self.ts_out]  
+        else:    
+            xout = self.waterdepth[index_e][index_t + self.timestep + self.predict_ahead]
         mask = self.dem_mask
         dem = self.dem
         diff_dem = self.diff_dem
