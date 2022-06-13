@@ -85,7 +85,7 @@ class OutConv(nn.Module):
 
 class UNet_bay(nn.Module):      
         
-    def __init__(self, args, n_classes=1, bilinear=True, border_size=0, timestep = 1, use_diff_dem=False, predict_ahead = 5, ts_out = 0):
+    def __init__(self, args, catchment_kwargs, border_size=0, n_classes=1, bilinear=True):
         super(UNet_bay, self).__init__()
 
         self.timestep = catchment_kwargs["timestep"]
