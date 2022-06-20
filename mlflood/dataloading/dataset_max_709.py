@@ -32,7 +32,8 @@ def load_dataset(catchment_kwargs):
                                 normalize_output = catchment_kwargs["normalize_output"],
                                 use_diff_dem = catchment_kwargs["use_diff_dem"],
                                 num_patch = catchment_kwargs["num_patch"],
-                                predict_ahead = catchment_kwargs["predict_ahead"])
+                                predict_ahead = catchment_kwargs["predict_ahead"],
+                                random_patches=True)
     
     valid_dataset = MyCatchment(PATH_GENERATED / Path(catchment_num+"-val.h5"), 
                                 tau = catchment_kwargs["tau"] ,
@@ -43,7 +44,8 @@ def load_dataset(catchment_kwargs):
                                 normalize_output = catchment_kwargs["normalize_output"],
                                 use_diff_dem = catchment_kwargs["use_diff_dem"],
                                 num_patch = catchment_kwargs["num_patch"],
-                                predict_ahead = catchment_kwargs["predict_ahead"])
+                                predict_ahead = catchment_kwargs["predict_ahead"],
+                                random_patches=False)
     
     return train_dataset, valid_dataset
 
@@ -107,7 +109,7 @@ def build_diff_dem(dem):
 
 class MyCatchment(torch.utils.data.Dataset):
     
-    def __init__(self,  h5file, tau=0.5, upsilon=0.1, timestep=1, sample_type="single", dim_patch=64, fix_indexes=False, border_size=0, normalize_output = False, use_diff_dem=True, num_patch = 10, predict_ahead = 0):
+    def __init__(self,  h5file, tau=0.5, upsilon=0.1, timestep=1, sample_type="single", dim_patch=64, fix_indexes=False, border_size=0, normalize_output = False, use_diff_dem=True, num_patch = 10, predict_ahead = 0, random_patches=True):
         '''
         Initialization
         '''
@@ -121,6 +123,7 @@ class MyCatchment(torch.utils.data.Dataset):
         self.normalize_output = normalize_output
         self.use_diff_dem = use_diff_dem
         self.predict_ahead = predict_ahead
+        self.random_patches = random_patches
 
         print(f"Load file: {h5file}")
         self.h5file = h5py.File(h5file, "r")
@@ -307,7 +310,7 @@ class MyCatchment(torch.utils.data.Dataset):
         
         return (x, mask)
 
-    def find_patch(self, mask, xout, index_t=None):
+    def find_patch_pryi(self, mask, xout, index_t=None):
         '''
         create patches with:
         - at least a fraction of tau non-zero elements in mask AND
@@ -320,18 +323,45 @@ class MyCatchment(torch.utils.data.Dataset):
         bool_wd = True
 
         while ((torch.sum(z_patch) < (self.nx*self.ny * self.tau)) or bool_wd): 
-            
+
             x_p = np.random.randint(0, self.px-self.nx+1)
             y_p = np.random.randint(0, self.py-self.ny+1)
-            
+
             xout_patch = xout[x_p:(x_p + self.nx+border*2), y_p:(y_p + self.ny+border*2)]  
-            
+
             # compute z_patch and bool_wd for while statement
             z_patch = mask[x_p:(x_p + self.nx+border*2), y_p:(y_p + self.ny+border*2)]
             # check the average wd in the patch > upsilon
-            #bool_wd = (torch.sum(xout_patch)/torch.sum(mask)) < self.upsilon
+
             a = xout_patch > 0.2
-            bool_wd = len(xout_patch[a]) < 1000 # the patch has atleast 1000 pixels with wd > 20 cm  
+            bool_wd = len(xout_patch[a]) < 1000 # the patch has atleast 1000 pixels with wd > 20 cm
+            
+        return x_p, y_p
+    
+    def find_patch(self, mask, xout, index_t = None):
+        '''
+        create patches with:
+        - at least a fraction of tau non-zero elements in mask AND
+        - at least a average water depth value within those elements larger than upsilon (in m) 
+        '''
+        
+        if self.random_patches:
+            
+            z_patch = torch.zeros(self.nx, self.ny)
+            xin_patch = torch.zeros(self.nx, self.ny)
+            border = self.border_size if self.do_pad else 0
+
+            while (torch.sum(z_patch) < (self.nx*self.ny * self.tau)): 
+
+                x_p = np.random.randint(0, self.px-self.nx+1)
+                y_p = np.random.randint(0, self.py-self.ny+1)
+                xout_patch = xout[x_p:(x_p + self.nx+border*2), y_p:(y_p + self.ny+border*2)]  
+                # compute z_patch for while statement
+                z_patch = mask[x_p:(x_p + self.nx+border*2), y_p:(y_p + self.ny+border*2)]
+    
+        else: 
+            x_p = (self.px - self.nx) // 2
+            y_p = (self.py - self.ny) // 2
             
         return x_p, y_p
 
