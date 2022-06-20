@@ -361,8 +361,9 @@ class MyCatchment(torch.utils.data.Dataset):
             if (index_t == 0 or index_t ==1 or index_t ==2): # check if we are at timestep zero, where WD out is usually all zero
                 bool_wd = False  # stops the while loop
             else:
-                bool_wd = (torch.sum(xin_patch)/torch.sum(mask)) < self.upsilon
-            
+#               bool_wd = (torch.sum(xin_patch)/torch.sum(mask)) < self.upsilon
+                bool_wd = (torch.sum(xin_patch)/torch.sum(z_patch)) < self.upsilon
+    
         return x_p, y_p
 
     def get_all_fix_indexes(self, non_full=False):
