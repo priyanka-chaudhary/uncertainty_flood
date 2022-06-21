@@ -61,7 +61,7 @@ def l1_loss_upd(input, target, mask):
 
 def l1_loss_funct(input_data, target, mask):
 
-    loss = torch.abs((input_data-2*target))
+    loss = torch.abs((input_data-target))*target*10
     loss = torch.mul(loss, mask)  # compute masked loss
     loss = loss.sum() / (torch.sum(mask.float()))
     return loss  # comput the mean only considering elemnts in the mask
