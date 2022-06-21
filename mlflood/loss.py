@@ -62,7 +62,7 @@ def l1_loss_upd(input, target, mask):
 
 def l1_loss_funct(input_data, target, mask):
 
-    loss = torch.abs((input_data-target))*target*10
+    loss = torch.abs((input_data-target))*target*10.65
     loss = torch.mul(loss, mask)  # compute masked loss
     loss = loss.sum() / (torch.sum(mask.float()))
     return loss  # comput the mean only considering elemnts in the mask
@@ -153,7 +153,7 @@ def get_loss(self, sample, output):
     elif self.args.loss == "bay_loss_ts_out":
         loss = bay_loss(output, sample["gt"], sample["mask"])  
     elif self.args.loss == "l1_loss_funct":
-        loss = l1_loss_funct(output, sample["gt"], sample["mask"])    
+        loss = l1_loss_funct(output["y_pred"], sample["gt"], sample["mask"])    
     else:
         raise NotImplementedError
 
