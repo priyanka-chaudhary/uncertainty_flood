@@ -9,7 +9,7 @@ import h5py
 from torch.utils.data import TensorDataset, DataLoader
 
 print(h5py.__version__)
-from conf import rain_const, waterdepth_diff_const
+from conf import rain_const, waterdepth_diff_const, max_depth_709_const
 
 def normalize(x):
     
@@ -31,6 +31,7 @@ def load_dataset(catchment_kwargs):
                                 fix_indexes = catchment_kwargs["fix_indexes"],
                                 normalize_output = catchment_kwargs["normalize_output"],
                                 use_diff_dem = catchment_kwargs["use_diff_dem"],
+                                use_mask = catchment_kwargs["use_mask_feat"],
                                 num_patch = catchment_kwargs["num_patch"],
                                 predict_ahead = catchment_kwargs["predict_ahead"],
                                 random_patches=True)
@@ -43,9 +44,10 @@ def load_dataset(catchment_kwargs):
                                 fix_indexes = catchment_kwargs["fix_indexes"],
                                 normalize_output = catchment_kwargs["normalize_output"],
                                 use_diff_dem = catchment_kwargs["use_diff_dem"],
+                                use_mask = catchment_kwargs["use_mask_feat"],
                                 num_patch = catchment_kwargs["num_patch"],
                                 predict_ahead = catchment_kwargs["predict_ahead"],
-                                random_patches=False)
+                                random_patches=True)
     
     return train_dataset, valid_dataset
 
@@ -60,9 +62,15 @@ def load_test_dataset(catchment_kwargs):
                                 fix_indexes = catchment_kwargs["fix_indexes"],
                                 normalize_output = catchment_kwargs["normalize_output"],
                                 use_diff_dem = catchment_kwargs["use_diff_dem"],
+                                use_mask = catchment_kwargs["use_mask_feat"],
                                 num_patch = catchment_kwargs["num_patch"],
                                 predict_ahead = catchment_kwargs["predict_ahead"])
     return dataset
+
+def get_topo_index(catchment_num):
+    path_topo_index = PATH_GENERATED / Path(catchment_num+"_topo_index.npy")
+    topo_index=np.load(path_topo_index)
+    return torch.as_tensor(topo_index)
 
 
 
@@ -109,7 +117,7 @@ def build_diff_dem(dem):
 
 class MyCatchment(torch.utils.data.Dataset):
     
-    def __init__(self,  h5file, tau=0.5, upsilon=0.1, timestep=1, sample_type="single", dim_patch=64, fix_indexes=False, border_size=0, normalize_output = False, use_diff_dem=True, num_patch = 10, predict_ahead = 0, random_patches=True):
+    def __init__(self,  h5file, tau=0.5, upsilon=0, timestep=1, sample_type="single", dim_patch=64, fix_indexes=False, border_size=0, normalize_output = False, use_diff_dem=True, num_patch = 10, predict_ahead = 0, use_mask = False, random_patches=True):
         '''
         Initialization
         '''
@@ -122,6 +130,7 @@ class MyCatchment(torch.utils.data.Dataset):
         self.do_pad = True
         self.normalize_output = normalize_output
         self.use_diff_dem = use_diff_dem
+        self.use_mask = use_mask
         self.predict_ahead = predict_ahead
         self.random_patches = random_patches
 
@@ -132,15 +141,18 @@ class MyCatchment(torch.utils.data.Dataset):
         self.dem_mask = self.pad_borders(torch.tensor(self.h5file["mask"][()]).bool(), False)
         self.dem[self.dem_mask==False] = -1
 
-        self.peak = self.pad_borders(torch.tensor(self.h5file["peak"][()]).float(), -1)
-        self.start_ts = self.pad_borders(torch.tensor(self.h5file["start_ts"][()]).float(), -1)
+        self.peak = self.pad_borders(torch.tensor(self.h5file["peak"][()]/max_depth_709_const).float(), -1)
+        #self.start_ts = self.pad_borders(torch.tensor(self.h5file["start_ts"][()]).float(), -1)
+        
+        self.topo_index = get_topo_index('709')
+        self.start_ts = self.pad_borders(torch.tensor(self.topo_index).float(), -1)
         
         self.diff_dem = build_diff_dem(self.dem)
         
         self.rainfall_events = []
         for k in filter(lambda x: "rainfall_events"==x[:15], keys ):
             self.rainfall_events.append(torch.tensor(self.h5file[k][()]/rain_const).float())
-        self.input_channels = 27  
+        self.input_channels = 14 + (4 if use_diff_dem else 0) + (1 if self.use_mask else 0)
         self.data_stats = {"input_channels": self.input_channels,
               "output_channels": 1}
 
@@ -218,7 +230,7 @@ class MyCatchment(torch.utils.data.Dataset):
         if self.fix_indexes:      
             tmp = index // len(self.inds)
             index_e = self.indexes_e[tmp] 
-            index_t = self.indexes_t[tmp]
+            #index_t = self.indexes_t[tmp]
             index_s = index % len(self.inds)  
             
             self.curr_index = index_s
@@ -295,22 +307,26 @@ class MyCatchment(torch.utils.data.Dataset):
         Optional: if timestep>2, the number of channels is increased accordingly and normalizes
         '''
         rain_ch = rainfall_events.shape[0]
+        rain_ch = 12
         rain_t = torch.zeros((rain_ch, *dem.shape))
         for i in range(rain_ch):    
             rain_t[i, mask] = rainfall_events[i]     # creates channels for rainfall
         
         d = 4 if self.use_diff_dem else 0
+        m = 1 if self.use_mask else 0
         x = torch.zeros((self.input_channels, *dem.shape))
         x[0] = dem.clone()
         if self.use_diff_dem:
             x[1:5] = diff_dem
-        x[1+d : 1+d + rain_ch] = rain_t
-        x[1+d + rain_ch] = xin
+        if self.use_mask:
+            x[1+d] = mask
+        x[1+d+m : 1+d+m + rain_ch] = rain_t
+        x[1+d+m + rain_ch] = xin
         mask = mask.unsqueeze(0).clone()
         
         return (x, mask)
 
-    def find_patch_pryi(self, mask, xout, index_t=None):
+    def find_patch(self, mask, xout, index_t=None):
         '''
         create patches with:
         - at least a fraction of tau non-zero elements in mask AND
@@ -323,22 +339,22 @@ class MyCatchment(torch.utils.data.Dataset):
         bool_wd = True
 
         while ((torch.sum(z_patch) < (self.nx*self.ny * self.tau)) or bool_wd): 
-
+            
             x_p = np.random.randint(0, self.px-self.nx+1)
             y_p = np.random.randint(0, self.py-self.ny+1)
-
+            
             xout_patch = xout[x_p:(x_p + self.nx+border*2), y_p:(y_p + self.ny+border*2)]  
-
+            
             # compute z_patch and bool_wd for while statement
             z_patch = mask[x_p:(x_p + self.nx+border*2), y_p:(y_p + self.ny+border*2)]
             # check the average wd in the patch > upsilon
-
-            a = xout_patch > 0.2
-            bool_wd = len(xout_patch[a]) < 1000 # the patch has atleast 1000 pixels with wd > 20 cm
+            #bool_wd = (torch.sum(xout_patch)/torch.sum(z_patch)) < self.upsilon
+            #a = xout_patch > 0.2
+            #bool_wd = len(xout_patch[a]) < 1000 # the patch has atleast 1000 pixels with wd > 20 cm  
             
         return x_p, y_p
-    
-    def find_patch(self, mask, xout, index_t = None):
+
+    def find_patch_stef(self, mask, xout, index_t = None):
         '''
         create patches with:
         - at least a fraction of tau non-zero elements in mask AND

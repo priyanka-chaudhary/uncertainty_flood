@@ -14,7 +14,7 @@ def get_model(args, catchment_kwargs):
         return Baseline.Baseline(args)
     if args.model == 'cnn':
         return CNNrolling.CNNrolling(args, catchment_kwargs)
-    if args.model == 'unet':
+    if args.model == 'unet' and args.if_bayesian == False:
         return unet.UNet(args, catchment_kwargs)
     if args.model == 'tcn':
         return TCN.TemporalConvNet(args)
@@ -22,7 +22,7 @@ def get_model(args, catchment_kwargs):
         return utae.UTAE(args)
     if args.model == 'unet3d':
         return unet3d.UNet3D(args)
-    if args.model == 'unet_bay':
+    if args.model == 'unet' and args.if_bayesian == True:
         torch.manual_seed(args.seed)
         return unet_bay.UNet_bay(args, catchment_kwargs)
     else:

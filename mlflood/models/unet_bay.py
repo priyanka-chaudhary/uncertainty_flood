@@ -85,28 +85,24 @@ class OutConv(nn.Module):
 
 class UNet_bay(nn.Module):      
         
-    def __init__(self, args, catchment_kwargs, border_size=0, n_classes=1, bilinear=True):
+    def __init__(self, args, catchment_kwargs, n_classes=1, bilinear=True, ts_out = 0):
         super(UNet_bay, self).__init__()
 
-        self.timestep = catchment_kwargs["timestep"]
         self.use_diff_dem = catchment_kwargs["use_diff_dem"]
-        self.border_size = catchment_kwargs["border_size"]
+        self.use_mask = catchment_kwargs["use_mask_feat"]
+        self.timestep = catchment_kwargs["timestep"]
         self.predict_ahead = catchment_kwargs["predict_ahead"]
         self.ts_out = catchment_kwargs["ts_out"]
-        self.n_channels =  self.timestep*3  + self.predict_ahead + (4 if self.use_diff_dem else 0)   #dem, rainfall*timestep, wd*timestep 
-        self.n_classes = n_classes
-        self.bilinear = bilinear
-        self.args = args
 
-        if args.task == "wd_ts":
-            self.n_channels =  self.timestep*3  + self.predict_ahead + (4 if self.use_diff_dem else 0)   #dem, rainfall*timestep, wd*timestep 
+        if args.task == "max_depth":
+            self.n_channels =14 + (4 if self.use_diff_dem else 0) + (1 if self.use_mask else 0)# 
         else:
-            self.n_channels = 26
+            self.n_channels = self.timestep*3  + self.predict_ahead + (4 if self.use_diff_dem else 0) + 1   #dem, rainfall*timestep, wd*timestep, topo feature
         
         self.n_classes = n_classes
         self.bilinear = bilinear
+        self.border_size = catchment_kwargs["border_size"]
         self.args = args
-        
 
         self.inc = DoubleConv(self.n_channels, 64)
         self.down1 = Down(64, 128)

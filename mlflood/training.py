@@ -28,20 +28,21 @@ def str2bool(v):
 
 ### Catchment settings
 catchment_kwargs = {}
-catchment_kwargs["num"] = ["F_01", "F_02"]#, "F_11_max", "F_13_max", "F_14_max", "S_01_max", "S_02_max", "S_03_max", "S_04_max", "S_06_max"]#"709"
-#catchment_kwargs['num'] = "709_max"
-catchment_kwargs['val'] = ["F_12", "S_05"] # in case of multi dataset
-catchment_kwargs["tau"] = 0.5
+#catchment_kwargs["num"] = ["F_01_max", "F_02_max", "F_11_max", "F_13_max", "F_14_max"]#, "S_01_max", "S_02_max", "S_03_max", "S_04_max", "S_06_max"]#"709"
+catchment_kwargs['num'] = "709"
+catchment_kwargs['val'] = ["F_12_max"]#, "S_05_max"] # in case of multi dataset
+catchment_kwargs["tau"] = 0.01
 catchment_kwargs["timestep"]= 1      # for timestep >1 use CNN rolling or Unet
 catchment_kwargs["sample_type"]="single"
-catchment_kwargs["dim_patch"]=256
+catchment_kwargs["dim_patch"]= 256
 catchment_kwargs["fix_indexes"]=False
 catchment_kwargs["border_size"] = 0
 catchment_kwargs["normalize_output"] = False
-catchment_kwargs["use_diff_dem"] = False
-catchment_kwargs["num_patch"] = 10      # number of patches to generate from a timestep
+catchment_kwargs["use_diff_dem"] = True
+catchment_kwargs["num_patch"] = 50      # number of patches to generate from a timestep
 catchment_kwargs["predict_ahead"] = 5  # how many timesteps ahead to predict; default value 0 for just predicting the next timestep
-catchment_kwargs["ts_out"] = 0 
+catchment_kwargs["use_mask_feat"] = True
+catchment_kwargs["ts_out"] = 0
 
 class DevelopingSuite(object):
 
@@ -180,6 +181,10 @@ class DevelopingSuite(object):
                     for key in loss_dict:
                         self.train_stats[key] += loss_dict[key]
 
+                self.writer.add_image('train_out', output['y_pred'], self.epoch, dataformats='NCHW')
+                self.writer.add_image('train_gt', sample['gt'], self.epoch, dataformats='NCHW')
+
+
                 loss.backward() #retain_graph=True)
                 self.optimizer.step()
 
@@ -227,6 +232,8 @@ class DevelopingSuite(object):
             # you can add patches to be visualozed in tensorboard that is very useful you just need to adapt
             # this function I think it is pretty straightforward
             #add_tensorboard_images(self.writer, sample, output, global_step=self.epoch,args=self.args)
+            self.writer.add_image('val_out', output['y_pred'], self.epoch, dataformats='NCHW')
+            self.writer.add_image('val_gt', sample['gt'], self.epoch, dataformats='NCHW')
 
             for key in self.val_stats:
                 if key != "best_optimization_loss":
@@ -320,7 +327,7 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser(description="training script")
 
     #### general parameters #####################################################
-    parser.add_argument('--tag', default="mask",type=str)
+    parser.add_argument('--tag', default="delete",type=str)
     #parser.add_argument('--tag', default="__",type=str)
     parser.add_argument("--device",default="cuda",type=str,choices=["cuda", "cpu"])
     parser.add_argument("--save-dir",default="/scratch2/flood_sim2/data/checkpoints/", 
@@ -333,7 +340,7 @@ if __name__ == '__main__':
     parser.add_argument('--mode',default="only_train",type=str,choices=["None","train","test","train_and_test", "only_train"],help="mode to be run")
 
     #### data parameters ##########################################################
-    parser.add_argument("--data",default="multi",type=str,choices=["toy", "709", "684", "multi"],help="dataset selection")
+    parser.add_argument("--data",default="709",type=str,choices=["toy", "709", "684", "multi"],help="dataset selection")
     parser.add_argument("--datafolder",type=str,help="root directory of the dataset")
     parser.add_argument("--workers", type=int, default=0,metavar="N",help="dataloader threads")
     parser.add_argument("--batch-size", type=int, default=8)
@@ -341,17 +348,17 @@ if __name__ == '__main__':
     #### optimizer parameters #####################################################
     parser.add_argument('--epochs', type=int, default=500)
     parser.add_argument('--optimizer',default='adam', choices=['sgd','adam'])
-    parser.add_argument('--lr', type=float, default=0.001)
+    parser.add_argument('--lr', type=float, default=0.0001)
     parser.add_argument('--momentum', type=float, default=0.9)
     #parser.add_argument('--momentum', type=float, default=0.99)
     parser.add_argument('--w-decay', type=float, default=0)#1e-5)
-    parser.add_argument('--lr-scheduler', type=str, default='multi',choices=['no','step', 'smart', 'multi', 'cyclic'],help='lr scheduler mode')
+    parser.add_argument('--lr-scheduler', type=str, default='step',choices=['no','step', 'smart', 'multi', 'cyclic'],help='lr scheduler mode')
     parser.add_argument('--lr-step', type=int, default=350,help=' number of epochs between decreasing steps applies to lr-scheduler in [step, exp]')
     parser.add_argument('--lr-gamma', type=float, default=0.1,help='decrease rate')
 
     #### model parameters #####################################################
-    parser.add_argument("--model", default='unet_bay', type=str,help="model to run: 'cnn', 'unet', 'utae', 'unet3d'")
-    parser.add_argument("--loss", default="lnll", type=str, help="loss ['MSE', 'L1', 'L1_upd', 'lnll', l1_loss_funct] ")
+    parser.add_argument("--model", default='unet', type=str,help="model to run: 'cnn', 'unet', 'utae', 'unet3d'")
+    parser.add_argument("--loss", default="lnll", type=str, help="loss ['MSE', 'L1', 'L1_upd', 'lnll'] ")
     parser.add_argument("--task",default="wd_ts",type=str,choices=["wd_ts", "max_depth"],help="select b/w task predicting water depth for next timesteps (wd_ts) or max depth for rainfall events")
     
     #### bayesian training parameters #########################################

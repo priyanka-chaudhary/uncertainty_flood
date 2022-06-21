@@ -4,6 +4,7 @@ import os
 
 rain_const = 150.4
 waterdepth_diff_const = 0.01
+max_depth_709_const = 10.65
 
 env_path = Path(__file__).parents[1] / ".env"
 if env_path.exists():

@@ -15,23 +15,24 @@ def l1_loss_weight(output, target):
     return loss   # comput the mean only considering elemnts in the mask
 
 
-def l1_loss(output, target):
-    mask = output[:,1]
-    predictions =  output[:,0]
-    target = target[:,0]
-    predictions = torch.mul(predictions, mask)
-#     loss = torch.mean(torch.abs(predictions  - target))    ####################### this is incorrect because you want to divide by the number of elements in the mask
-    loss = torch.abs(predictions  - target)
-    loss = loss.sum()/(torch.sum(mask.float()))
-    return loss   # comput the mean only considering elemnts in the mask
+def l1_loss_(input, target, mask):
 
-def l2_loss(output, target):
-    mask = output[:,1]
-    predictions =  output[:,0]
-    target = target[:,0]
-    predictions = torch.mul(predictions, mask)
-    loss = torch.mean(torch.square(predictions  - target))
-    return loss   # comput the mean only considering elemnts in the mask
+    assert input.shape == target.shape
+
+    loss = torch.abs((input -target))
+    loss = torch.mul(loss, mask)  # compute masked loss
+    loss = loss.sum() / (torch.sum(mask.float()))
+    return loss  # comput the mean only considering elemnts in the mask
+
+
+def l2_loss(input, target, mask):
+
+    assert input.shape == target.shape
+
+    loss = torch.square(input -target)
+    loss = torch.mul(loss, mask)  # compute masked loss
+    loss = loss.sum() / (torch.sum(mask.float()))
+    return loss  # comput the mean only considering elemnts in the mask
 
 def l2_weighted(input, target, mask):
     
@@ -101,12 +102,14 @@ def lnll(predictions, target, mask, eps=1e-8):
     mu, sigma = predictions['y_pred'], predictions['sigma'] 
 
     assert mu.shape == sigma.shape == target.shape
+
     #Clamp for stability
-    
     sigma = sigma.clone()
     with torch.no_grad():
         sigma.clamp_(min=eps)
+
     loss = torch.abs((mu -target))/sigma + torch.log(sigma)
+
     # aincrease loss for pixels > 20 cm
     a = target > 0.2
     loss[a] = loss[a] * 4  # loss[a] = torch.square(loss[a])
@@ -135,8 +138,10 @@ def get_loss(self, sample, output):
         loss = F.mse_loss(out, sample["gt"])
     elif self.args.loss == "l2_w":
         loss = l2_weighted(output["y_pred"], sample["gt"], sample["mask"])
+    elif self.args.loss == "L2":
+        loss = l2_loss(output["y_pred"], sample["gt"], sample["mask"])
     elif self.args.loss == "L1":
-        loss = F.l1_loss(out, sample["gt"])
+        loss = l1_loss_(output["y_pred"], sample["gt"], sample["mask"])
     elif self.args.loss == "L1_upd":
         loss = l1_loss_upd(output["y_pred"], sample["gt"], sample["mask"])
     elif self.args.loss == "bay_loss":
@@ -144,11 +149,11 @@ def get_loss(self, sample, output):
     elif self.args.loss == "lnll":
         loss = lnll(output, sample["gt"], sample["mask"]) 
     elif self.args.loss == "exp_loss":
-        loss = exp_loss(output["y_pred"], sample["gt"], sample["mask"])   
+        loss = exp_loss(output["y_pred"], sample["gt"], sample["mask"]) 
     elif self.args.loss == "bay_loss_ts_out":
         loss = bay_loss(output, sample["gt"], sample["mask"])  
     elif self.args.loss == "l1_loss_funct":
-        loss = l1_loss_funct(output, sample["gt"], sample["mask"])  
+        loss = l1_loss_funct(output, sample["gt"], sample["mask"])    
     else:
         raise NotImplementedError
 
