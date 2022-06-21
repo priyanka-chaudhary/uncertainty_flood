@@ -336,7 +336,7 @@ class MyCatchment(torch.utils.data.Dataset):
         z_patch = torch.zeros(self.nx, self.ny)
         xout_patch = torch.zeros(self.nx, self.ny)
         border = self.border_size if self.do_pad else 0
-        bool_wd = True
+        bool_wd = False
 
         while ((torch.sum(z_patch) < (self.nx*self.ny * self.tau)) or bool_wd): 
             
