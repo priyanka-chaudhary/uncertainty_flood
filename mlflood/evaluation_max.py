@@ -314,11 +314,13 @@ def predict_event(model, dataset, event_num, arch, start_ts=None, ar = True, T =
     ar: auto regressively
     start_ts: start at timestep start_ts (if None starts at 0.)
     """
+    
+    
 
-    def create_inputs(dataset, x_p, y_p, xin, rainfall, mask, dem, diff_dem):
-            xin, mask, dem, diff_dem, _ = dataset.crop_to_patch(x_p, y_p, xin, mask, dem, diff_dem)
+    def create_inputs(dataset, x_p, y_p, xin, rainfall, mask, dem, diff_dem, xout):
+            xin, mask, dem, diff_dem, xout = dataset.crop_to_patch(x_p, y_p, xin, mask, dem, diff_dem, xout)
             inputs = dataset.build_inputs(xin, rainfall, mask, dem, diff_dem)
-            return inputs
+            return inputs, xout
 
     patch_dim = dataset.nx
     inds = dataset.get_all_fix_indexes(non_full=False) 
@@ -330,22 +332,26 @@ def predict_event(model, dataset, event_num, arch, start_ts=None, ar = True, T =
     diff_dem = dataset.diff_dem
     mask = dataset.dem_mask
     recons_pred_full = torch.zeros(dataset.px - 2*b, dataset.py - 2*b)
+    recons_gt_full = torch.zeros(dataset.px - 2*b, dataset.py - 2*b)
+    target = dataset.peak[event_num]
 
     for inds_count, (x_p, y_p) in enumerate(inds):
 
-        inputs_ts = create_inputs(dataset, x_p, y_p, xin, rainfall, mask, dem, diff_dem)
+        inputs_ts, xout = create_inputs(dataset, x_p, y_p, xin, rainfall, mask, dem, diff_dem, target)
         (data, mask1) = inputs_ts
         print(data.shape)
         data = data.unsqueeze(dim=0)
         data = to_device_eval(data)
         y_pred = model(data)['y_pred'].squeeze().detach().cpu()
+        y_true = xout.squeeze().detach().cpu()
 
         plt.imshow(y_pred, cmap = 'Blues')
         plt.show()
 
         recons_pred_full[x_p:x_p+patch_dim, y_p:y_p + patch_dim] = y_pred
-  
-    recons_gt_full = dataset.peak[event_num].clone()
+        recons_gt_full[x_p:x_p+patch_dim, y_p:y_p + patch_dim] = y_true
+
+#     recons_gt_full = dataset.peak[event_num].clone()
     recons_mask_full = mask.clone()
 
     return recons_pred_full.numpy(), recons_gt_full.numpy(), recons_mask_full.numpy()
