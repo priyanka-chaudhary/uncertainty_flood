@@ -337,7 +337,7 @@ if __name__ == '__main__':
 
     #### model parameters #####################################################	
     parser.add_argument("--model", default='unet3d', type=str,help="model to run: 'cnn', 'unet', 'utae', 'unet3d', 'unet_bay'")
-    parser.add_argument("--loss", default="L1", type=str, help="loss ['MSE', 'L1', 'L1_upd', 'bay_loss'] ")
+    parser.add_argument("--loss", default="L1", type=str, help="loss ['MSE', 'L1', 'L1_upd', 'bay_loss', l1_loss_funct] ")
     parser.add_argument("--task",default="wd_ts",type=str,choices=["wd_ts", "max_depth"],help="select b/w task predicting water depth for next timesteps (wd_ts) or max depth for rainfall events")
     ## training files takes 2 random patches instead of 100 in the normal file. loc: /scratch2/flood_sim/data/709/one_alt/
 

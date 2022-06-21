@@ -351,7 +351,7 @@ if __name__ == '__main__':
 
     #### model parameters #####################################################
     parser.add_argument("--model", default='unet_bay', type=str,help="model to run: 'cnn', 'unet', 'utae', 'unet3d'")
-    parser.add_argument("--loss", default="lnll", type=str, help="loss ['MSE', 'L1', 'L1_upd', 'lnll'] ")
+    parser.add_argument("--loss", default="lnll", type=str, help="loss ['MSE', 'L1', 'L1_upd', 'lnll', l1_loss_funct] ")
     parser.add_argument("--task",default="wd_ts",type=str,choices=["wd_ts", "max_depth"],help="select b/w task predicting water depth for next timesteps (wd_ts) or max depth for rainfall events")
     
     #### bayesian training parameters #########################################
