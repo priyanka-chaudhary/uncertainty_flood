@@ -15,7 +15,7 @@ from dataloading import get_dataloaders
 from utils import new_log
 from models import get_model
 
-from loss import l1_loss_weight, l2_loss, l1_loss, bay_loss, bay_loss_ts_out
+from loss import l1_loss_weight, l2_loss, l1_loss_, bay_loss, bay_loss_ts_out
 
 from evaluation import predict_batch, predict_event, mae_event
 from evaluation import plot_maes, multiboxplot, plot_answer_sample, boxplot_mae
