@@ -25,17 +25,6 @@ def base_model(device=None, border_size=0, normalize_output=False, use_diff_dem=
             device=device)
     return model
 
-""" def perfect_graph_model(device=None, border_size=2, timestep=1, normalize_output=False, use_diff_dem=True):
-    model = Model(PerfectGraph(border_size=border_size, timestep=timestep, normalize_output=normalize_output, use_diff_dem=use_diff_dem), None, "mse", 
-            epoch_metrics=[ SKLearnMetrics(metric_flatten(r2_score)), 
-                              SKLearnMetrics(metric_flatten(explained_variance_score)), 
-                              SKLearnMetrics(metric_flatten(mean_squared_error)), 
-                              SKLearnMetrics(metric_flatten(median_absolute_error))
-                            ],
-            device=device)
-    return model """
-
-
 ############################################################################################################################################################
 ##################################################################  Data Visualization ############################################################################ 
 
@@ -306,7 +295,7 @@ def predict_dataset(model, dataset, start_ts=None, ar = True):
 
 def predict_event(model, dataset, event_num, arch, start_ts=None, ar = True, T = None):
     """
-    Predict a full event.
+    Predict a full event using overlapping patches. The fuction returns a reconstructed catchment minus a border size of 10 to remove border effect between patches
     
     This function will split the prediction if `dataset.sample_type == "single"`. 
     Alternatively, it will use the full frame to predict if `dataset.sample_type == "full"`.
@@ -321,6 +310,17 @@ def predict_event(model, dataset, event_num, arch, start_ts=None, ar = True, T =
             xin, mask, dem, diff_dem, xout = dataset.crop_to_patch(x_p, y_p, xin, mask, dem, diff_dem, xout)
             inputs = dataset.build_inputs(xin, rainfall, mask, dem, diff_dem)
             return inputs, xout
+        
+    def crop_overlapping_patches(y_pred, patch_dim):
+        '''
+        crops a patch to fit it for the overlapping reconstruction
+        '''
+        cropped = y_pred[10: 
+                         int(patch_dim/2) + 10, 
+                         10: 
+                         int(patch_dim/2) + 10]
+        return cropped
+
 
     patch_dim = dataset.nx
     inds = dataset.get_all_fix_indexes(non_full=False) 
@@ -348,129 +348,23 @@ def predict_event(model, dataset, event_num, arch, start_ts=None, ar = True, T =
         plt.imshow(y_pred, cmap = 'Blues')
         plt.show()
 
-        recons_pred_full[x_p:x_p+patch_dim, y_p:y_p + patch_dim] = y_pred
-        recons_gt_full[x_p:x_p+patch_dim, y_p:y_p + patch_dim] = y_true
+#         recons_pred_full[x_p:x_p+patch_dim, y_p:y_p + patch_dim] = y_pred
+#         recons_gt_full[x_p:x_p+patch_dim, y_p:y_p + patch_dim] = y_true
 
-#     recons_gt_full = dataset.peak[event_num].clone()
+        recons_pred_full[x_p + 10:
+                     x_p + 10 + (int(patch_dim/2)),
+                     y_p + 10:
+                     y_p + 10 + (int(patch_dim/2))] = crop_overlapping_patches(y_pred, patch_dim)
+        recons_gt_full[x_p + 10:
+                    x_p + 10 + (int(patch_dim/2)),
+                    y_p + 10:
+                    y_p + 10 + (int(patch_dim/2))] = crop_overlapping_patches(y_true, patch_dim)
+        
     recons_mask_full = mask.clone()
 
     return recons_pred_full.numpy(), recons_gt_full.numpy(), recons_mask_full.numpy()
 
 
-# def predict_next_ts(dataset, model, xin, rainfall, mask, dem, diff_dem) :
-#     """Predict the next timestep. T x C x H x W
-#     T = timestep, C = channels, H = height, W = width
-#     """
-  
-#     b = dataset.border_size
-#     normalize_output = dataset.normalize_output
-        
-#     if dataset.sample_type == "full":
-#         inputs_ts = dataset.build_inputs(xin, rainfall, mask, dem, diff_dem)
-#         recons_pred = torch.from_numpy(model.predict([[inputs_ts]], verbose=0)[:,0].squeeze())
-#         if normalize_output:
-#             px, py = recons_pred.shape
-#             if b:
-#                 xin = xin[:, b: -b, b:-b] 
-#             recons_pred = xin[-1] + unnormalize(recons_pred)
-
-#     else:
-        
-#         def create_inputs(dataset, x_p, y_p, xin, rainfall, mask, dem, diff_dem):
-#             xin, mask, dem, diff_dem, _ = dataset.crop_to_patch(x_p, y_p, xin, mask, dem, diff_dem)
-#             inputs = dataset.build_inputs(xin, rainfall, mask, dem, diff_dem)
-#             return inputs
-        
-#         nx = dataset.nx
-#         ny = dataset.ny
-
-#         inds = dataset.get_all_fix_indexes(non_full=True) 
-#         recons_pred = torch.zeros(dataset.px - 2*b, dataset.py - 2*b)   
-#         for inds_count, (x_p, y_p) in enumerate(inds):
-
-#             inputs_ts = create_inputs(dataset, x_p, y_p, xin, rainfall, mask, dem, diff_dem)
-#             # unpack the tuple 
-#             (data, mask1) = inputs_ts
-#             ## temp fpr padding the sample
-#             size1 = nx
-#             size2 = ny
-#             data2 = torch.zeros(dataset.timestep, data.shape[1], nx, ny)
-#             if (data.shape[2] != dataset.nx) or (data.shape[3] != dataset.nx):
-#                 size1 = data.shape[2]
-#                 size2 = data.shape[3]
-#                 data2[:, : , :size1, :size2] = data[:,:,:,:]
-#                 data = data2.clone()
-#             # make the data [1, 15, 256, 256] from [15, 256, 256] and to cuda
-#             data = data.unsqueeze(0) 
-#             data = to_device_eval(data) 
-#             y_pred = model(data)['y_pred'].squeeze().detach().cpu()
-
-#             # temp - removing padding
-#             y_pred = y_pred[:size1, :size2]            
-
-#             y_pred = y_pred*mask1
-
-#             x_p2 = x_p + (nx-b*2) 
-#             y_p2 = y_p + (ny-b*2)
-#             if normalize_output:
-#                 px, py = y_pred.shape
-#                 y_pred = xin[-1, x_p+b: x_p+b+ px, y_p+b:y_p + b + py] + unnormalize(y_pred)
-#             recons_pred[x_p:x_p2, y_p:y_p2] = y_pred
-    
-#     return recons_pred
-
-
-# def predict_next_ts_cnn(dataset, model, xin, rainfall, mask, dem, diff_dem):
-
-#     """Predict the next timestep for unet arch. C x H x W
-#     C = channels, H = height, W = width
-#     """
-
-#     b = dataset.border_size
-#     normalize_output = dataset.normalize_output
-        
-#     if dataset.sample_type == "full":
-#         inputs_ts = dataset.build_inputs(xin, rainfall, mask, dem, diff_dem)
-#         recons_pred = torch.from_numpy(model.predict([[inputs_ts]], verbose=0)[:,0].squeeze())
-#         if normalize_output:
-#             px, py = recons_pred.shape
-#             if b:
-#                 xin = xin[:, b: -b, b:-b] 
-#             recons_pred = xin[-1] + unnormalize(recons_pred)
-
-#     else:
-        
-#         def create_inputs(dataset, x_p, y_p, xin, rainfall, mask, dem, diff_dem):
-#             xin, mask, dem, diff_dem, _ = dataset.crop_to_patch(x_p, y_p, xin, mask, dem, diff_dem)
-#             inputs = dataset.build_inputs(xin, rainfall, mask, dem, diff_dem)
-#             return inputs
-        
-#         nx = dataset.nx
-#         ny = dataset.ny
-
-#         inds = dataset.get_all_fix_indexes(non_full=True) 
-#         recons_pred = torch.zeros(dataset.px - 2*b, dataset.py - 2*b)   
-#         for inds_count, (x_p, y_p) in enumerate(inds):
-
-#             inputs_ts = create_inputs(dataset, x_p, y_p, xin, rainfall, mask, dem, diff_dem)
-            
-#             # stef
-#             (data, mask1) = inputs_ts
-#             data = data.unsqueeze(dim=0)
-#             data = to_device_eval(data)
-#             y_pred = model(data)
-#             y_pred = y_pred['y_pred'].squeeze().detach().cpu()
-            
-#             pred_cnn_ts = y_pred * mask1.squeeze()
-#             pred_cnn_ts = pred_cnn_ts.numpy()
-#             x_p2 = x_p + (nx-b*2) 
-#             y_p2 = y_p + (ny-b*2)
-#             if normalize_output:
-#                 px, py = y_pred.shape
-#                 y_pred = xin[-1, x_p+b: x_p+b+ px, y_p+b:y_p + b + py] + unnormalize(y_pred)
-#             recons_pred[x_p:x_p2, y_p:y_p2] = y_pred
-    
-#     return recons_pred
 
 ############################################################################################################################################################
 ##################################################################  Plots ############################################################################ 

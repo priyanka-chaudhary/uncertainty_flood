@@ -398,8 +398,13 @@ class MyCatchment(torch.utils.data.Dataset):
         else:
             mx = self.px - self.nx + 1 
             my = self.py - self.ny + 1
-        indx =  np.arange(0, mx, self.nx-border*2)    
-        indy = np.arange(0, my, self.ny-border*2)         
+        # overlapping
+        indx =  np.arange(0, mx, int(self.nx/2))
+        indy =  np.arange(0, my, int(self.ny/2))    
+        # non overlapping
+#         indx =  np.arange(0, mx, self.nx-border*2)    
+#         indy = np.arange(0, my, self.ny-border*2)         
+        x, y = np.meshgrid(indx,indy)      
         x, y = np.meshgrid(indx,indy)
         
         return np.array([x.flatten(), y.flatten()]).T
