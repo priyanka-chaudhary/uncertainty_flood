@@ -193,6 +193,7 @@ class MyCatchment(torch.utils.data.Dataset):
             assert(self.nx<=self.px)
             assert(self.ny<=self.py)
         
+        
     def pad_borders(self, x, value):
         
         return pad(x, 4*[self.border_size], mode='constant', value=value)

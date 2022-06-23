@@ -149,7 +149,7 @@ class MyCatchment(torch.utils.data.Dataset):
         self.rainfall_events = []
         for k in filter(lambda x: "rainfall_events"==x[:15], keys ):
             self.rainfall_events.append(torch.tensor(self.h5file[k][()]).float())
-        self.input_channels = 26  
+        self.input_channels = 14 
         self.data_stats = {"input_channels": self.input_channels,
               "output_channels": 1}
 

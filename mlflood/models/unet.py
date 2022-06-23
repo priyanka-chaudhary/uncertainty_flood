@@ -82,18 +82,22 @@ class OutConv(nn.Module):
         return self.conv(x)
 
 ## """ Full assembly of the parts to form the complete network """
-        
+
 class UNet(nn.Module):      
         
-    def __init__(self, args, catchment_kwargs, n_classes=1, bilinear=True, border_size=0):
+    def __init__(self, args, catchment_kwargs, n_classes=1, bilinear=True):
         super(UNet, self).__init__()
+        self.use_diff_dem = catchment_kwargs["use_diff_dem"]
+        self.use_mask = catchment_kwargs["use_mask_feat"]
         self.timestep = catchment_kwargs["timestep"]
         self.predict_ahead = catchment_kwargs["predict_ahead"]
-        self.use_diff_dem = catchment_kwargs["use_diff_dem"]
-        self.n_channels = 15 + (4 if self.use_diff_dem else 0)   #dem, rainfall*timestep, wd*timestep 
+        if args.task == "max_depth":
+            self.n_channels =14 + (4 if self.use_diff_dem else 0) + (1 if self.use_mask else 0)# 
+        else:
+            self.n_channels = self.timestep*3  + self.predict_ahead + (4 if self.use_diff_dem else 0) #+ 1   #dem, rainfall*timestep, wd*timestep 
         self.n_classes = n_classes
         self.bilinear = bilinear
-        self.border_size = border_size
+        self.border_size = catchment_kwargs["border_size"]
         self.args = args
 
         self.inc = DoubleConv(self.n_channels, 64)
@@ -107,8 +111,6 @@ class UNet(nn.Module):
         self.up3 = Up(256, 128 // factor, bilinear)
         self.up4 = Up(128, 64, bilinear)
         self.outc = OutConv(64, n_classes)
-
-        
 
     def forward(self, inputs):
         if type(inputs) is dict:

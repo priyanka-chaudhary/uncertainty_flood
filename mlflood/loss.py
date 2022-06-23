@@ -2,6 +2,7 @@ import torch
 import math
 import torch.nn.functional as F
 import numpy as np
+from conf import max_depth_const_dict
 
 def l1_loss_weight(output, target):
     mask = output[:,1]
@@ -46,13 +47,15 @@ def l2_weighted(input, target, mask):
     loss = loss.sum() / (torch.sum(mask.float()))
     return loss 
 
-def l1_loss_upd(input, target, mask):
+def l1_loss_upd(input, target, mask, max_depth):
     ## L1 loss with increase loss value
     ## for wd > 20 cms by factor of 4
     
     assert input.shape == target.shape
 
     loss = torch.abs((input-target))
+    # as the data is normalized
+    target = target*max_depth
     # increase loss for pixels > 20 cm
     a = target > 0.2
     loss[a] = loss[a] * 4  # loss[a] = torch.square(loss[a])
@@ -60,9 +63,9 @@ def l1_loss_upd(input, target, mask):
     loss = loss.sum() / (torch.sum(mask.float()))
     return loss  # comput the mean only considering elemnts in the mask
 
-def l1_loss_funct(input_data, target, mask):
+def l1_loss_funct(input_data, target, mask, max_depth):
 
-    loss = torch.abs((input_data-target))*target*10.65
+    loss = torch.abs((input_data-target))*target*max_depth
     loss = torch.mul(loss, mask)  # compute masked loss
     loss = loss.sum() / (torch.sum(mask.float()))
     return loss  # comput the mean only considering elemnts in the mask
@@ -96,7 +99,7 @@ def bay_loss_ts_out(predictions, target, local_mask):
     return loss
 
 
-def lnll(predictions, target, mask, eps=1e-8):
+def lnll(predictions, target, mask, max_depth, eps=1e-8):
     ## laplacian negative log likelihood loss
     ## with mean with data elements from mask
     mu, sigma = predictions['y_pred'], predictions['sigma'] 
@@ -110,6 +113,8 @@ def lnll(predictions, target, mask, eps=1e-8):
 
     loss = torch.abs((mu -target))/sigma + torch.log(sigma)
 
+    # as the data is normalized
+    target = target*max_depth
     # aincrease loss for pixels > 20 cm
     a = target > 0.2
     loss[a] = loss[a] * 4  # loss[a] = torch.square(loss[a])
@@ -133,6 +138,9 @@ def exp_loss(input, target, mask):
 
 def get_loss(self, sample, output):
 
+    data = self.args.data
+    max_depth = max_depth_const_dict[data] 
+
     out =  output['y_pred'] * sample['mask']
     if self.args.loss == "MSE":
         loss = F.mse_loss(out, sample["gt"])
@@ -143,17 +151,17 @@ def get_loss(self, sample, output):
     elif self.args.loss == "L1":
         loss = l1_loss_(output["y_pred"], sample["gt"], sample["mask"])
     elif self.args.loss == "L1_upd":
-        loss = l1_loss_upd(output["y_pred"], sample["gt"], sample["mask"])
+        loss = l1_loss_upd(output["y_pred"], sample["gt"], sample["mask"], max_depth)
     elif self.args.loss == "bay_loss":
         loss = bay_loss(output, sample["gt"], sample["mask"]) 
     elif self.args.loss == "lnll":
-        loss = lnll(output, sample["gt"], sample["mask"]) 
+        loss = lnll(output, sample["gt"], sample["mask"], max_depth) 
     elif self.args.loss == "exp_loss":
         loss = exp_loss(output["y_pred"], sample["gt"], sample["mask"]) 
     elif self.args.loss == "bay_loss_ts_out":
         loss = bay_loss(output, sample["gt"], sample["mask"])  
     elif self.args.loss == "l1_loss_funct":
-        loss = l1_loss_funct(output["y_pred"], sample["gt"], sample["mask"])    
+        loss = l1_loss_funct(output["y_pred"], sample["gt"], sample["mask"], max_depth)    
     else:
         raise NotImplementedError
 

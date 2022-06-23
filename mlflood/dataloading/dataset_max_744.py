@@ -6,6 +6,7 @@ import torch.utils.data as torchdata
 from conf import PATH_GENERATED
 from pathlib import Path
 import h5py
+import torchvision.transforms as T
 from torch.utils.data import TensorDataset, DataLoader
 
 print(h5py.__version__)
@@ -23,7 +24,7 @@ def unnormalize(x):
 def load_dataset(catchment_kwargs):
     
     catchment_num = catchment_kwargs['num']
-    train_dataset = MyCatchment(PATH_GENERATED / Path(catchment_num+"-train.h5"),
+    train_dataset = MyCatchment(PATH_GENERATED / Path(catchment_num+"-train.h5"), 
                                 c_num = catchment_num,
                                 tau = catchment_kwargs["tau"] ,
                                 timestep = catchment_kwargs["timestep"],
@@ -32,6 +33,7 @@ def load_dataset(catchment_kwargs):
                                 fix_indexes = catchment_kwargs["fix_indexes"],
                                 normalize_output = catchment_kwargs["normalize_output"],
                                 use_diff_dem = catchment_kwargs["use_diff_dem"],
+                                use_mask = catchment_kwargs["use_mask_feat"],
                                 num_patch = catchment_kwargs["num_patch"],
                                 predict_ahead = catchment_kwargs["predict_ahead"],
                                 random_patches=True)
@@ -45,6 +47,7 @@ def load_dataset(catchment_kwargs):
                                 fix_indexes = catchment_kwargs["fix_indexes"],
                                 normalize_output = catchment_kwargs["normalize_output"],
                                 use_diff_dem = catchment_kwargs["use_diff_dem"],
+                                use_mask = catchment_kwargs["use_mask_feat"],
                                 num_patch = catchment_kwargs["num_patch"],
                                 predict_ahead = catchment_kwargs["predict_ahead"],
                                 random_patches=True)
@@ -63,9 +66,15 @@ def load_test_dataset(catchment_kwargs):
                                 fix_indexes = catchment_kwargs["fix_indexes"],
                                 normalize_output = catchment_kwargs["normalize_output"],
                                 use_diff_dem = catchment_kwargs["use_diff_dem"],
+                                use_mask = catchment_kwargs["use_mask_feat"],
                                 num_patch = catchment_kwargs["num_patch"],
                                 predict_ahead = catchment_kwargs["predict_ahead"])
     return dataset
+
+def get_topo_index(catchment_num):
+    path_topo_index = PATH_GENERATED / Path(catchment_num+"_topo_index.npy")
+    topo_index=np.load(path_topo_index)
+    return torch.as_tensor(topo_index)
 
 
 
@@ -110,14 +119,9 @@ def build_diff_dem(dem):
     dy2 = torch.unsqueeze(torch.diff(dem, append=torch.tensor([[-1]]*px), dim=1), 0)
     return torch.cat([dx1,dx2,dy1,dy2])
 
-def get_topo_index(catchment_num):
-    path_topo_index = PATH_GENERATED / Path(catchment_num+"_topo_index.npy")
-    topo_index=np.load(path_topo_index)
-    return torch.as_tensor(topo_index)
-
 class MyCatchment(torch.utils.data.Dataset):
     
-    def __init__(self,  h5file, c_num, tau=0.5, upsilon=0, timestep=1, sample_type="single", dim_patch=64, fix_indexes=False, border_size=0, normalize_output = False, use_diff_dem=True, num_patch = 10, predict_ahead = 0, ts_out = 0, random_patches=True):
+    def __init__(self,  h5file, c_num, tau=0.5, upsilon=0, timestep=1, sample_type="single", dim_patch=64, fix_indexes=False, border_size=0, normalize_output = False, use_diff_dem=True, num_patch = 10, predict_ahead = 0, use_mask = False, random_patches=True):
         '''
         Initialization
         '''
@@ -130,8 +134,10 @@ class MyCatchment(torch.utils.data.Dataset):
         self.do_pad = True
         self.normalize_output = normalize_output
         self.use_diff_dem = use_diff_dem
+        self.use_mask = use_mask
         self.predict_ahead = predict_ahead
-        self.ts_out = ts_out
+        self.random_patches = random_patches
+        #self.transform = transform
         self.c_num = c_num
 
         print(f"Load file: {h5file}")
@@ -141,31 +147,26 @@ class MyCatchment(torch.utils.data.Dataset):
         self.dem_mask = self.pad_borders(torch.tensor(self.h5file["mask"][()]).bool(), False)
         self.dem[self.dem_mask==False] = -1
 
+        self.peak = self.pad_borders(torch.tensor(self.h5file["peak"][()]/max_depth_const_dict[self.c_num]).float(), -1)
+        self.start_ts = self.pad_borders(torch.tensor(self.h5file["start_ts"][()]).float(), -1)
+        
         #self.topo_index = get_topo_index('709')
-        #self.topo = self.pad_borders(torch.tensor(self.topo_index).float(), -1)
+        #self.start_ts = self.pad_borders(torch.tensor(self.topo_index).float(), -1)
         
         self.diff_dem = build_diff_dem(self.dem)
-        self.input_channels = 3 *timestep + (4 if use_diff_dem else 0) + self.predict_ahead# + 1 # 1 for topogrpahic feature
-        self.data_stats = {"input_channels": self.input_channels,
-              "output_channels": 1}
         
         self.rainfall_events = []
         for k in filter(lambda x: "rainfall_events"==x[:15], keys ):
             self.rainfall_events.append(torch.tensor(self.h5file[k][()]/rain_const).float())
-        in_memory = True
-        self.waterdepth = []
-        for k in filter(lambda x: "waterdepth"==x[:10], keys):
-            if in_memory:
-                self.waterdepth.append(self.pad_borders(torch.from_numpy(self.h5file[k][()]/max_depth_const_dict[self.c_num]).float(), 0))
-            else:
-                assert not self.do_pad
-                raise ValueError("This no longer works!")
-                self.waterdepth.append(self.h5file[k])         
-        self.N_events = len(self.waterdepth)
-        self.px = self.waterdepth[0].shape[1]
-        self.py = self.waterdepth[0].shape[2]
-        self.T_steps = [len(x) for x in self.rainfall_events]
+        self.input_channels = 14 + (4 if use_diff_dem else 0) + (1 if self.use_mask else 0)
+        self.data_stats = {"input_channels": self.input_channels,
+              "output_channels": 1}
 
+        self.N_events = self.peak.shape[0]
+        self.px = self.start_ts.shape[0]
+        self.py = self.start_ts.shape[1]
+        self.T_steps = [len(x) for x in self.rainfall_events]
+        
 
         self.sample_type = sample_type
         if self.sample_type == "full":
@@ -186,8 +187,6 @@ class MyCatchment(torch.utils.data.Dataset):
         self.build_indexes()
 
         assert(len(self.rainfall_events)==self.N_events)
-        for i in range(self.N_events):
-            assert(self.rainfall_events[i].shape[0]==self.waterdepth[i].shape[0]==self.T_steps[i])
         assert(self.dem.shape[0]==self.px)
         assert(self.dem.shape[1]==self.py)        
         assert(self.dem_mask.shape[0]==self.px)
@@ -207,27 +206,14 @@ class MyCatchment(torch.utils.data.Dataset):
 
         self.indexes_t = []
         self.indexes_e = []
-        v = 0
 
-        for i, nt in enumerate(self.T_steps):
-            if self.ts_out:
-                nv = nt-self.timestep - self.predict_ahead - (self.ts_out - 1)
-            else:
-                nv = nt-self.timestep - self.predict_ahead
-
-
-            if nv>0:
-                self.indexes_t.append(np.arange(nv))
-                self.indexes_e.append(np.ones([nv], dtype=int)*i)
-                v += nv
-        self.indexes_t = np.concatenate(self.indexes_t)
+        self.indexes_e.append(np.arange(self.N_events))
         self.indexes_e = np.concatenate(self.indexes_e)
 
         # for more than 1 patch per timestep
         if self.num_patch > 1 and self.fix_indexes == False:
-            self.indexes_t = np.tile(self.indexes_t, self.num_patch)
             self.indexes_e = np.tile(self.indexes_e, self.num_patch)
-        self.N_batch_images = len(self.indexes_t)
+        self.N_batch_images = len(self.indexes_e)
 
         if self.fix_indexes:
             self.inds = self.get_all_fix_indexes()   # returns all possible incexes without random generation
@@ -250,7 +236,7 @@ class MyCatchment(torch.utils.data.Dataset):
         if self.fix_indexes:      
             tmp = index // len(self.inds)
             index_e = self.indexes_e[tmp] 
-            index_t = self.indexes_t[tmp]
+            #index_t = self.indexes_t[tmp]
             index_s = index % len(self.inds)  
             
             self.curr_index = index_s
@@ -258,32 +244,29 @@ class MyCatchment(torch.utils.data.Dataset):
             
         else:     
             index_e = self.indexes_e[index] 
-            index_t = self.indexes_t[index]
+            index_t = []
             index_s = None
         
         # select input data. based on current index_e, index_t and number of timesteps
-        xin = self.waterdepth[index_e][index_t: index_t + self.timestep]
-        if self.ts_out:
-            # ts_out channels as output - but we will care about the last for the prediction
-            xout = self.waterdepth[index_e][index_t + self.timestep +self.predict_ahead: 
-                                            index_t + self.timestep +self.predict_ahead + self.ts_out]  
-        else: 
-            xout = self.waterdepth[index_e][index_t + self.timestep + self.predict_ahead]
+        xin = self.start_ts
+        xout = self.peak[index_e]
         mask = self.dem_mask
         dem = self.dem
         diff_dem = self.diff_dem
-        #topo = self.topo
         if self.sample_type == "single":
 
             if self.fix_indexes:
                 x_p, y_p = self.inds[index_s]    # finds adjacent coordinates
             else:
-                x_p, y_p = self.find_patch(mask, xin, index_t)
+                x_p, y_p = self.find_patch(mask, xout, index_t)
             xin, mask, dem, diff_dem, xout = self.crop_to_patch(x_p, y_p, xin, mask, dem, diff_dem, xout)
 
         outputs = self.build_output(xout, xin, mask)
         
-        inputs = self.build_inputs(xin, self.rainfall_events[index_e][index_t:index_t+self.timestep+ self.predict_ahead], mask, dem, diff_dem)
+        #if self.transform:
+        #    outputs = self.transform(outputs)
+        
+        inputs = self.build_inputs(xin, self.rainfall_events[index_e], mask, dem, diff_dem)
         
         return inputs, outputs   
     
@@ -292,11 +275,10 @@ class MyCatchment(torch.utils.data.Dataset):
         Crops a patch of xin, mask, dem, xout based on current coordinates x_p, y_p
         '''
 
-        xin = xin[:, x_p:x_p+self.nx, y_p:y_p+self.ny]
+        xin = xin[x_p:x_p+self.nx, y_p:y_p+self.ny]
         diff_dem = diff_dem[:, x_p:x_p+self.nx, y_p:y_p+self.ny]
         mask = mask[x_p:x_p+self.nx, y_p:y_p+self.ny]
         dem = dem[x_p:x_p+self.nx, y_p:y_p+self.ny]
-        #topo = topo[x_p:x_p+self.nx, y_p:y_p+self.ny]
         if xout is not None:
             xout = xout[x_p:x_p+self.nx, y_p:y_p+self.ny]
         
@@ -333,28 +315,31 @@ class MyCatchment(torch.utils.data.Dataset):
         
         Optional: if timestep>2, the number of channels is increased accordingly and normalizes
         '''
-        
-        tsh = self.predict_ahead
-        rain_t = torch.zeros((self.timestep + tsh, *dem.shape))
-        for i in range(self.timestep + self.predict_ahead):    
+        rain_ch = rainfall_events.shape[0]
+        rain_ch = 12
+        rain_t = torch.zeros((rain_ch, *dem.shape))
+        for i in range(rain_ch):    
             rain_t[i, mask] = rainfall_events[i]     # creates channels for rainfall
         
         d = 4 if self.use_diff_dem else 0
+        m = 1 if self.use_mask else 0
         x = torch.zeros((self.input_channels, *dem.shape))
         x[0] = dem.clone()
         if self.use_diff_dem:
             x[1:5] = diff_dem
-        #x[1+d] = topo
-        x[1+d : self.timestep+1+d + tsh] = rain_t
-        x[self.timestep+1+d + tsh: 2*self.timestep+1+d+ tsh] = xin
-        if self.timestep>1:
-            x[2*self.timestep+1+d+ tsh:] = normalize(torch.diff(xin, axis=0))            
-
+        if self.use_mask:
+            x[1+d] = mask
+        x[1+d+m : 1+d+m + rain_ch] = rain_t
+        x[1+d+m + rain_ch] = mask#xin    # for 744 mask here as we do not have topogrphic feature
         mask = mask.unsqueeze(0).clone()
+
+        #if self.transform:
+        #    x = self.transform(x)
+        #    mask = self.transform(mask)
         
         return (x, mask)
 
-    def find_patch(self, mask, xin, index_t):
+    def find_patch(self, mask, xout, index_t=None):
         '''
         create patches with:
         - at least a fraction of tau non-zero elements in mask AND
@@ -362,23 +347,50 @@ class MyCatchment(torch.utils.data.Dataset):
         '''
 
         z_patch = torch.zeros(self.nx, self.ny)
-        xin_patch = torch.zeros(self.nx, self.ny)
+        xout_patch = torch.zeros(self.nx, self.ny)
         border = self.border_size if self.do_pad else 0
-        bool_wd = True
+        bool_wd = False
 
         while ((torch.sum(z_patch) < (self.nx*self.ny * self.tau)) or bool_wd): 
             
             x_p = np.random.randint(0, self.px-self.nx+1)
             y_p = np.random.randint(0, self.py-self.ny+1)
             
-            xin_patch = xin[:, x_p:(x_p + self.nx+border*2), y_p:(y_p + self.ny+border*2)]  
+            xout_patch = xout[x_p:(x_p + self.nx+border*2), y_p:(y_p + self.ny+border*2)]  
             
             # compute z_patch and bool_wd for while statement
             z_patch = mask[x_p:(x_p + self.nx+border*2), y_p:(y_p + self.ny+border*2)]
-            if (index_t == 0 or index_t ==1 or index_t ==2): # check if we are at timestep zero, where WD out is usually all zero
-                bool_wd = False  # stops the while loop
-            else:
-                bool_wd = (torch.sum(xin_patch)/torch.sum(mask)) < self.upsilon
+            # check the average wd in the patch > upsilon
+            #bool_wd = (torch.sum(xout_patch)/torch.sum(z_patch)) < self.upsilon
+            #a = xout_patch > 0.2
+            #bool_wd = len(xout_patch[a]) < 1000 # the patch has atleast 1000 pixels with wd > 20 cm  
+            
+        return x_p, y_p
+
+    def find_patch_stef(self, mask, xout, index_t = None):
+        '''
+        create patches with:
+        - at least a fraction of tau non-zero elements in mask AND
+        - at least a average water depth value within those elements larger than upsilon (in m) 
+        '''
+        
+        if self.random_patches:
+            
+            z_patch = torch.zeros(self.nx, self.ny)
+            xin_patch = torch.zeros(self.nx, self.ny)
+            border = self.border_size if self.do_pad else 0
+
+            while (torch.sum(z_patch) < (self.nx*self.ny * self.tau)): 
+
+                x_p = np.random.randint(0, self.px-self.nx+1)
+                y_p = np.random.randint(0, self.py-self.ny+1)
+                xout_patch = xout[x_p:(x_p + self.nx+border*2), y_p:(y_p + self.ny+border*2)]  
+                # compute z_patch for while statement
+                z_patch = mask[x_p:(x_p + self.nx+border*2), y_p:(y_p + self.ny+border*2)]
+    
+        else: 
+            x_p = (self.px - self.nx) // 2
+            y_p = (self.py - self.ny) // 2
             
         return x_p, y_p
 

@@ -4,7 +4,11 @@ import os
 
 rain_const = 150.4
 waterdepth_diff_const = 0.01
-max_depth_709_const = 10.65
+max_depth_const_dict = {}
+max_depth_const_dict["709_max"] = 10.65
+max_depth_const_dict["744_max"] = 7.71
+max_depth_const_dict["709"] = 10.65
+max_depth_const_dict["744"] = 7.71
 
 env_path = Path(__file__).parents[1] / ".env"
 if env_path.exists():

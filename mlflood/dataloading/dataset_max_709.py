@@ -6,10 +6,14 @@ import torch.utils.data as torchdata
 from conf import PATH_GENERATED
 from pathlib import Path
 import h5py
+import torchvision.transforms as T
 from torch.utils.data import TensorDataset, DataLoader
 
 print(h5py.__version__)
-from conf import rain_const, waterdepth_diff_const, max_depth_709_const
+from conf import rain_const, waterdepth_diff_const, max_depth_const_dict
+
+#transform = T.RandomApply(torch.nn.ModuleList([T.RandomRotation(180)]), p=0.5)
+transform = T.RandomApply(torch.nn.ModuleList([T.RandomVerticalFlip(0.3), T.RandomHorizontalFlip(0.3)]), p=0.5)
 
 def normalize(x):
     
@@ -24,6 +28,7 @@ def load_dataset(catchment_kwargs):
     
     catchment_num = catchment_kwargs['num']
     train_dataset = MyCatchment(PATH_GENERATED / Path(catchment_num+"-train.h5"), 
+                                c_num = catchment_num,
                                 tau = catchment_kwargs["tau"] ,
                                 timestep = catchment_kwargs["timestep"],
                                 sample_type = catchment_kwargs["sample_type"],
@@ -37,6 +42,7 @@ def load_dataset(catchment_kwargs):
                                 random_patches=True)
     
     valid_dataset = MyCatchment(PATH_GENERATED / Path(catchment_num+"-val.h5"), 
+                                c_num = catchment_num,
                                 tau = catchment_kwargs["tau"] ,
                                 timestep = catchment_kwargs["timestep"],
                                 sample_type = catchment_kwargs["sample_type"],
@@ -55,6 +61,7 @@ def load_test_dataset(catchment_kwargs):
     
     catchment_num = catchment_kwargs['num']
     dataset = MyCatchment(PATH_GENERATED / Path(catchment_num+"-test.h5"), 
+                                c_num = catchment_num,
                                 tau = catchment_kwargs["tau"] ,
                                 timestep = catchment_kwargs["timestep"],
                                 sample_type = catchment_kwargs["sample_type"],
@@ -117,7 +124,7 @@ def build_diff_dem(dem):
 
 class MyCatchment(torch.utils.data.Dataset):
     
-    def __init__(self,  h5file, tau=0.5, upsilon=0, timestep=1, sample_type="single", dim_patch=64, fix_indexes=False, border_size=0, normalize_output = False, use_diff_dem=True, num_patch = 10, predict_ahead = 0, use_mask = False, random_patches=True):
+    def __init__(self,  h5file, c_num, tau=0.5, upsilon=0, timestep=1, sample_type="single", dim_patch=64, fix_indexes=False, border_size=0, normalize_output = False, use_diff_dem=True, num_patch = 10, predict_ahead = 0, use_mask = False, random_patches=True, transform=False):
         '''
         Initialization
         '''
@@ -133,6 +140,8 @@ class MyCatchment(torch.utils.data.Dataset):
         self.use_mask = use_mask
         self.predict_ahead = predict_ahead
         self.random_patches = random_patches
+        self.transform = transform
+        self.c_num = c_num
 
         print(f"Load file: {h5file}")
         self.h5file = h5py.File(h5file, "r")
@@ -141,7 +150,7 @@ class MyCatchment(torch.utils.data.Dataset):
         self.dem_mask = self.pad_borders(torch.tensor(self.h5file["mask"][()]).bool(), False)
         self.dem[self.dem_mask==False] = -1
 
-        self.peak = self.pad_borders(torch.tensor(self.h5file["peak"][()]/max_depth_709_const).float(), -1)
+        self.peak = self.pad_borders(torch.tensor(self.h5file["peak"][()]/max_depth_const_dict[self.c_num]).float(), -1)
         #self.start_ts = self.pad_borders(torch.tensor(self.h5file["start_ts"][()]).float(), -1)
         
         self.topo_index = get_topo_index('709')
@@ -257,6 +266,9 @@ class MyCatchment(torch.utils.data.Dataset):
 
         outputs = self.build_output(xout, xin, mask)
         
+        if self.transform:
+            outputs = self.transform(outputs)
+        
         inputs = self.build_inputs(xin, self.rainfall_events[index_e], mask, dem, diff_dem)
         
         return inputs, outputs   
@@ -321,8 +333,12 @@ class MyCatchment(torch.utils.data.Dataset):
         if self.use_mask:
             x[1+d] = mask
         x[1+d+m : 1+d+m + rain_ch] = rain_t
-        x[1+d+m + rain_ch] = xin
+        x[1+d+m + rain_ch] = xin    # for 744 mask here as we do not have topogrphic feature
         mask = mask.unsqueeze(0).clone()
+
+        if self.transform:
+            x = self.transform(x)
+            mask = self.transform(mask)
         
         return (x, mask)
 
