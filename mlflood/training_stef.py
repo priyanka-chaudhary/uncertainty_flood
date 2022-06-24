@@ -80,6 +80,7 @@ class DevelopingSuite(object):
 
     def train_and_eval(self):
         
+        print(self.args.if_bayesian)
         
         if self.args.l1_prior == True and self.args.if_bayesian == True:
             def create_weight(conv_layer, dist):
@@ -309,7 +310,7 @@ if __name__ == '__main__':
     parser.add_argument('--tag', default="temp",type=str)
     #parser.add_argument('--tag', default="__",type=str)
     parser.add_argument("--device",default="cuda",type=str,choices=["cuda", "cpu"])
-    parser.add_argument("--save-dir",default="/scratch2/ml_flood/data/checkpoints/", 
+    parser.add_argument("--save-dir",default="/scratch2/flood_sim2/data/checkpoints/", 
                         help="Path to directory where models and logs should be saved saved !! this folder must already exist !!")
     parser.add_argument("--logstep-train", default=10,type=int,
                         help="iterations step for training log")
@@ -319,7 +320,7 @@ if __name__ == '__main__':
     parser.add_argument('--mode',default="only_train",type=str,choices=["None","train","test","train_and_test", "only_train"],help="mode to be run")
 
     #### data parameters ##########################################################
-    parser.add_argument("--data",default="709",type=str,choices=["toy", "709", "684", "multi"],help="dataset selection")
+    parser.add_argument("--data",default="709",type=str,choices=["toy", "709", "684", "744" ,"multi"],help="dataset selection")
     parser.add_argument("--datafolder",type=str,help="root directory of the dataset")
     parser.add_argument("--workers", type=int, default=4,metavar="N",help="dataloader threads")
     parser.add_argument("--batch-size", type=int, default=8)
@@ -336,13 +337,13 @@ if __name__ == '__main__':
     parser.add_argument('--lr-gamma', type=float, default=0.1,help='decrease rate')
 
     #### model parameters #####################################################	
-    parser.add_argument("--model", default='unet3d', type=str,help="model to run: 'cnn', 'unet', 'utae', 'unet3d', 'unet_bay'")
+    parser.add_argument("--model", default='unet', type=str,help="model to run: 'cnn', 'unet', 'utae', 'unet3d', 'unet_bay'")
     parser.add_argument("--loss", default="L1", type=str, help="loss ['MSE', 'L1', 'L1_upd', 'bay_loss', l1_loss_funct] ")
     parser.add_argument("--task",default="wd_ts",type=str,choices=["wd_ts", "max_depth"],help="select b/w task predicting water depth for next timesteps (wd_ts) or max depth for rainfall events")
     ## training files takes 2 random patches instead of 100 in the normal file. loc: /scratch2/flood_sim/data/709/one_alt/
 
     #### bayesian training parameters #########################################
-    parser.add_argument("--if_bayesian",default=True,type=bool,choices=[True,False],help="training using bayesian predictive uncertainty") 
+    parser.add_argument("--if_bayesian",default=False,type=bool,choices=[True,False],help="training using bayesian predictive uncertainty") 
     parser.add_argument('--num_models', type=int, default=5)
     parser.add_argument("--model_number",default="model1",type=str,help="ensemble model number training")
     parser.add_argument('--seed', type=int, default=27,help="model1: 19, model2: 27, model3: 37, model4: 45, model5: 73")
@@ -350,7 +351,7 @@ if __name__ == '__main__':
     ## saving model on l1 loss if bayesian
     parser.add_argument('--save_best_l1',default=False,type=bool,choices=[True,False],help="saving model based on best l1 loss")    
     ## laplace prior
-    parser.add_argument('--l1_prior',default=True,type=bool,choices=[True,False],help="saving model based on best l1 loss")
+    parser.add_argument('--l1_prior',default=False,type=bool,choices=[True,False],help="saving model based on best l1 loss")
     ## prior scale value
     parser.add_argument("--prior_sc", default=0.05,type=float,help="fraction of non-zero elements to accept a patch for training")
     #parser.add_argument('--exp', type=str, default='exp4',choices=['exp1','exp2', 'exp3', 'exp4'],help='select which experiment to run')
