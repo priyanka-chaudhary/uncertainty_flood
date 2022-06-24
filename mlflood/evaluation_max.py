@@ -1,7 +1,7 @@
 import numpy as np
 from tqdm import tqdm
 import torch
-from poutyne import Model, SKLearnMetrics
+#from poutyne import Model, SKLearnMetrics
 from dataloading.dataset_max_709 import unnormalize, normalize, pad_borders
 from utils import metric_flatten
 from models.Baseline import Baseline
@@ -306,10 +306,10 @@ def predict_event(model, dataset, event_num, arch, start_ts=None, ar = True, T =
     
     
 
-    def create_inputs(dataset, x_p, y_p, xin, rainfall, mask, dem, diff_dem, xout):
-            xin, mask, dem, diff_dem, xout = dataset.crop_to_patch(x_p, y_p, xin, mask, dem, diff_dem, xout)
-            inputs = dataset.build_inputs(xin, rainfall, mask, dem, diff_dem)
-            return inputs, xout
+    def create_inputs(dataset, x_p, y_p, xin, rainfall, mask, dem, diff_dem, feat_ex, xout):
+        xin, mask, dem, diff_dem, feat_ex, xout = dataset.crop_to_patch(x_p, y_p, xin, mask, dem, diff_dem, feat_ex, xout)
+        inputs = dataset.build_inputs(xin, rainfall, mask, dem, diff_dem, feat_ex)
+        return inputs, xout
         
     def crop_overlapping_patches(y_pred, patch_dim):
         '''
@@ -327,6 +327,7 @@ def predict_event(model, dataset, event_num, arch, start_ts=None, ar = True, T =
     b = dataset.border_size
     
     xin = dataset.start_ts.clone()
+    feat_ex = dataset.feat
     rainfall = dataset.rainfall_events[event_num].clone()
     dem = dataset.dem
     diff_dem = dataset.diff_dem
@@ -337,7 +338,7 @@ def predict_event(model, dataset, event_num, arch, start_ts=None, ar = True, T =
 
     for inds_count, (x_p, y_p) in enumerate(inds):
 
-        inputs_ts, xout = create_inputs(dataset, x_p, y_p, xin, rainfall, mask, dem, diff_dem, target)
+        inputs_ts, xout = create_inputs(dataset, x_p, y_p, xin, rainfall, mask, dem, diff_dem, feat_ex, target)
         (data, mask1) = inputs_ts
         print(data.shape)
         data = data.unsqueeze(dim=0)
