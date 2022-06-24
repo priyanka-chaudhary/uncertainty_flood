@@ -348,5 +348,6 @@ exp_yml/
 log.txt
 /mlflood/*.sh
 train.sh
+train_bay.sh
 train_unet_cnn.sh
 mlflood/__pycache__/*
