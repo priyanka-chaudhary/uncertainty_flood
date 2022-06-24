@@ -92,10 +92,11 @@ class UNet_bay(nn.Module):
         self.use_mask = catchment_kwargs["use_mask_feat"]
         self.timestep = catchment_kwargs["timestep"]
         self.predict_ahead = catchment_kwargs["predict_ahead"]
+        self.use_feat = catchment_kwargs["use_feat"]
         self.ts_out = catchment_kwargs["ts_out"]
 
         if args.task == "max_depth":
-            self.n_channels =14 + (4 if self.use_diff_dem else 0) + (1 if self.use_mask else 0)# 
+            self.n_channels =14 + (4 if self.use_diff_dem else 0) + (1 if self.use_mask else 0) + (3 if self.use_feat else 0)# 
         else:
             self.n_channels = self.timestep*3  + self.predict_ahead + (4 if self.use_diff_dem else 0) + 1   #dem, rainfall*timestep, wd*timestep, topo feature
         

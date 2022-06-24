@@ -29,7 +29,7 @@ def str2bool(v):
 ### Catchment settings
 catchment_kwargs = {}
 #catchment_kwargs["num"] = ["F_01_max", "F_02_max", "F_11_max", "F_13_max", "F_14_max"]#, "S_01_max", "S_02_max", "S_03_max", "S_04_max", "S_06_max"]#"709"
-catchment_kwargs['num'] = "709"
+catchment_kwargs['num'] = "744_max"
 catchment_kwargs['val'] = ["F_12_max"]#, "S_05_max"] # in case of multi dataset
 catchment_kwargs["tau"] = 0.01
 catchment_kwargs["timestep"]= 1      # for timestep >1 use CNN rolling or Unet
@@ -41,7 +41,8 @@ catchment_kwargs["normalize_output"] = False
 catchment_kwargs["use_diff_dem"] = True
 catchment_kwargs["num_patch"] = 50      # number of patches to generate from a timestep
 catchment_kwargs["predict_ahead"] = 5  # how many timesteps ahead to predict; default value 0 for just predicting the next timestep
-catchment_kwargs["use_mask_feat"] = True
+catchment_kwargs["use_mask_feat"] = False
+catchment_kwargs["use_feat"] = True
 catchment_kwargs["ts_out"] = 0
 
 class DevelopingSuite(object):
@@ -327,7 +328,7 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser(description="training script")
 
     #### general parameters #####################################################
-    parser.add_argument('--tag', default="delete",type=str)
+    parser.add_argument('--tag', default="max_2406",type=str)
     #parser.add_argument('--tag', default="__",type=str)
     parser.add_argument("--device",default="cuda",type=str,choices=["cuda", "cpu"])
     parser.add_argument("--save-dir",default="/scratch2/flood_sim2/data/checkpoints/", 
@@ -340,7 +341,7 @@ if __name__ == '__main__':
     parser.add_argument('--mode',default="only_train",type=str,choices=["None","train","test","train_and_test", "only_train"],help="mode to be run")
 
     #### data parameters ##########################################################
-    parser.add_argument("--data",default="709",type=str,choices=["toy", "709", "684", "multi"],help="dataset selection")
+    parser.add_argument("--data",default="744",type=str,choices=["toy", "709", "684", "744", "multi"],help="dataset selection")
     parser.add_argument("--datafolder",type=str,help="root directory of the dataset")
     parser.add_argument("--workers", type=int, default=0,metavar="N",help="dataloader threads")
     parser.add_argument("--batch-size", type=int, default=8)
@@ -359,7 +360,7 @@ if __name__ == '__main__':
     #### model parameters #####################################################
     parser.add_argument("--model", default='unet', type=str,help="model to run: 'cnn', 'unet', 'utae', 'unet3d'")
     parser.add_argument("--loss", default="lnll", type=str, help="loss ['MSE', 'L1', 'L1_upd', 'lnll'] ")
-    parser.add_argument("--task",default="wd_ts",type=str,choices=["wd_ts", "max_depth"],help="select b/w task predicting water depth for next timesteps (wd_ts) or max depth for rainfall events")
+    parser.add_argument("--task",default="max_depth",type=str,choices=["wd_ts", "max_depth"],help="select b/w task predicting water depth for next timesteps (wd_ts) or max depth for rainfall events")
     
     #### bayesian training parameters #########################################
     parser.add_argument("--if_bayesian",default=True,type=bool,choices=[True,False],help="training using bayesian predictive uncertainty") 

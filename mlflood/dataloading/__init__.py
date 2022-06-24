@@ -30,10 +30,10 @@ def get_dataloaders(args, catchment_kwargs):
         train, val = load_multi_max(catchment_kwargs)
         return dl_args_multi_max(train, val, catchment_num=catchment_kwargs["num"], batch_size=args.batch_size)
     
-    if args.task == "max_depth" and args.data == "709":
+    if args.task == "max_depth" and args.data in ["709", "744"]:
         train, val = load_catch_709_max(catchment_kwargs)
         return dl_args_709_max(train, val, catchment_num=catchment_kwargs["num"], batch_size=args.batch_size)
-    if args.task == "max_depth" and args.data == "744":
+    if args.task == "max_depth" and args.data == "Lucern":
         train, val = load_catch_744_max(catchment_kwargs)
         return dl_args_744_max(train, val, catchment_num=catchment_kwargs["num"], batch_size=args.batch_size)
     else:

@@ -39,6 +39,7 @@ def load_dataset(catchment_kwargs):
                                 use_mask = catchment_kwargs["use_mask_feat"],
                                 num_patch = catchment_kwargs["num_patch"],
                                 predict_ahead = catchment_kwargs["predict_ahead"],
+                                use_feat = catchment_kwargs["use_feat"], 
                                 random_patches=True)
     
     valid_dataset = MyCatchment(PATH_GENERATED / Path(catchment_num+"-val.h5"), 
@@ -53,6 +54,7 @@ def load_dataset(catchment_kwargs):
                                 use_mask = catchment_kwargs["use_mask_feat"],
                                 num_patch = catchment_kwargs["num_patch"],
                                 predict_ahead = catchment_kwargs["predict_ahead"],
+                                use_feat = catchment_kwargs["use_feat"], 
                                 random_patches=True)
     
     return train_dataset, valid_dataset
@@ -70,6 +72,7 @@ def load_test_dataset(catchment_kwargs):
                                 normalize_output = catchment_kwargs["normalize_output"],
                                 use_diff_dem = catchment_kwargs["use_diff_dem"],
                                 use_mask = catchment_kwargs["use_mask_feat"],
+                                use_feat = catchment_kwargs["use_feat"], 
                                 num_patch = catchment_kwargs["num_patch"],
                                 predict_ahead = catchment_kwargs["predict_ahead"])
     return dataset
@@ -79,6 +82,20 @@ def get_topo_index(catchment_num):
     topo_index=np.load(path_topo_index)
     return torch.as_tensor(topo_index)
 
+def get_features(catchment_num):
+    path_slope = PATH_GENERATED / Path(catchment_num+"_slope.npy")
+    slope = np.load(path_slope)
+    slope = torch.unsqueeze(torch.as_tensor(slope), dim=0)
+
+    path_aspect = PATH_GENERATED / Path(catchment_num+"_aspect.npy")
+    aspect = np.load(path_aspect)
+    aspect = torch.unsqueeze(torch.as_tensor(aspect), dim=0)
+
+    path_curv = PATH_GENERATED / Path(catchment_num+"_curv.npy")
+    curv = np.load(path_curv)  
+    curv = torch.unsqueeze(torch.as_tensor(curv), dim=0)
+
+    return torch.cat([slope,aspect,curv])
 
 
 def dataloader_args(train_dataset, valid_dataset, catchment_num = "toy", batch_size = 8):
@@ -124,7 +141,7 @@ def build_diff_dem(dem):
 
 class MyCatchment(torch.utils.data.Dataset):
     
-    def __init__(self,  h5file, c_num, tau=0.5, upsilon=0, timestep=1, sample_type="single", dim_patch=64, fix_indexes=False, border_size=0, normalize_output = False, use_diff_dem=True, num_patch = 10, predict_ahead = 0, use_mask = False, random_patches=True, transform=False):
+    def __init__(self,  h5file, c_num, tau=0.5, upsilon=0, timestep=1, sample_type="single", dim_patch=64, fix_indexes=False, border_size=0, normalize_output = False, use_diff_dem=True, num_patch = 10, predict_ahead = 0, use_mask = False, random_patches=True, transform=False, use_feat = True):
         '''
         Initialization
         '''
@@ -138,10 +155,11 @@ class MyCatchment(torch.utils.data.Dataset):
         self.normalize_output = normalize_output
         self.use_diff_dem = use_diff_dem
         self.use_mask = use_mask
+        self.use_feat = use_feat
         self.predict_ahead = predict_ahead
         self.random_patches = random_patches
         self.transform = transform
-        self.c_num = c_num
+        self.c_num = c_num[:-4] # remove _max from the end
 
         print(f"Load file: {h5file}")
         self.h5file = h5py.File(h5file, "r")
@@ -153,15 +171,18 @@ class MyCatchment(torch.utils.data.Dataset):
         self.peak = self.pad_borders(torch.tensor(self.h5file["peak"][()]/max_depth_const_dict[self.c_num]).float(), -1)
         #self.start_ts = self.pad_borders(torch.tensor(self.h5file["start_ts"][()]).float(), -1)
         
-        self.topo_index = get_topo_index('709')
+        self.topo_index = get_topo_index(self.c_num)
         self.start_ts = self.pad_borders(torch.tensor(self.topo_index).float(), -1)
+
+        temp = get_features(self.c_num)
+        self.feat = self.pad_borders(torch.tensor(temp).float(), -1)
         
         self.diff_dem = build_diff_dem(self.dem)
         
         self.rainfall_events = []
         for k in filter(lambda x: "rainfall_events"==x[:15], keys ):
             self.rainfall_events.append(torch.tensor(self.h5file[k][()]/rain_const).float())
-        self.input_channels = 14 + (4 if use_diff_dem else 0) + (1 if self.use_mask else 0)
+        self.input_channels = 14 + (4 if use_diff_dem else 0) + (1 if self.use_mask else 0) + (3 if self.use_feat else 0)
         self.data_stats = {"input_channels": self.input_channels,
               "output_channels": 1}
 
@@ -256,36 +277,38 @@ class MyCatchment(torch.utils.data.Dataset):
         mask = self.dem_mask
         dem = self.dem
         diff_dem = self.diff_dem
+        feat_ex = self.feat
         if self.sample_type == "single":
 
             if self.fix_indexes:
                 x_p, y_p = self.inds[index_s]    # finds adjacent coordinates
             else:
                 x_p, y_p = self.find_patch(mask, xout, index_t)
-            xin, mask, dem, diff_dem, xout = self.crop_to_patch(x_p, y_p, xin, mask, dem, diff_dem, xout)
+            xin, mask, dem, diff_dem, feat_ex, xout = self.crop_to_patch(x_p, y_p, xin, mask, dem, diff_dem, feat_ex, xout)
 
         outputs = self.build_output(xout, xin, mask)
         
         if self.transform:
             outputs = self.transform(outputs)
         
-        inputs = self.build_inputs(xin, self.rainfall_events[index_e], mask, dem, diff_dem)
+        inputs = self.build_inputs(xin, self.rainfall_events[index_e], mask, dem, diff_dem, feat_ex)
         
         return inputs, outputs   
     
-    def crop_to_patch(self, x_p, y_p, xin, mask, dem, diff_dem, xout=None):
+    def crop_to_patch(self, x_p, y_p, xin, mask, dem, diff_dem, feat_ex, xout=None):
         '''
         Crops a patch of xin, mask, dem, xout based on current coordinates x_p, y_p
         '''
 
         xin = xin[x_p:x_p+self.nx, y_p:y_p+self.ny]
         diff_dem = diff_dem[:, x_p:x_p+self.nx, y_p:y_p+self.ny]
+        feat_ex = feat_ex[:, x_p:x_p+self.nx, y_p:y_p+self.ny]
         mask = mask[x_p:x_p+self.nx, y_p:y_p+self.ny]
         dem = dem[x_p:x_p+self.nx, y_p:y_p+self.ny]
         if xout is not None:
             xout = xout[x_p:x_p+self.nx, y_p:y_p+self.ny]
         
-        return xin, mask, dem, diff_dem, xout
+        return xin, mask, dem, diff_dem, feat_ex, xout
     
     def build_output(self, xout, xin, mask):
         '''
@@ -310,7 +333,7 @@ class MyCatchment(torch.utils.data.Dataset):
         
         return y
     
-    def build_inputs(self, xin, rainfall_events, mask, dem, diff_dem):
+    def build_inputs(self, xin, rainfall_events, mask, dem, diff_dem, feat_ex):
 
         '''
         Builds input channels for the model and returns (inputs, mask)
@@ -333,7 +356,9 @@ class MyCatchment(torch.utils.data.Dataset):
         if self.use_mask:
             x[1+d] = mask
         x[1+d+m : 1+d+m + rain_ch] = rain_t
-        x[1+d+m + rain_ch] = xin    # for 744 mask here as we do not have topogrphic feature
+        x[1+d+m + rain_ch] = xin    
+        if self.use_feat:
+            x[14+d+m:17+d+m] = feat_ex 
         mask = mask.unsqueeze(0).clone()
 
         if self.transform:
@@ -420,7 +445,7 @@ class MyCatchment(torch.utils.data.Dataset):
         # non overlapping
 #         indx =  np.arange(0, mx, self.nx-border*2)    
 #         indy = np.arange(0, my, self.ny-border*2)         
-        x, y = np.meshgrid(indx,indy)      
+        x, y = np.meshgrid(indx,indy)  
         x, y = np.meshgrid(indx,indy)
         
         return np.array([x.flatten(), y.flatten()]).T

@@ -85,19 +85,20 @@ class OutConv(nn.Module):
 
 class UNet(nn.Module):      
         
-    def __init__(self, args, catchment_kwargs, n_classes=1, bilinear=True):
+    def __init__(self, args, catchment_kwargs, n_classes=1, bilinear=True, border_size=0):
         super(UNet, self).__init__()
         self.use_diff_dem = catchment_kwargs["use_diff_dem"]
         self.use_mask = catchment_kwargs["use_mask_feat"]
         self.timestep = catchment_kwargs["timestep"]
         self.predict_ahead = catchment_kwargs["predict_ahead"]
+        self.use_feat = catchment_kwargs["use_feat"]
         if args.task == "max_depth":
-            self.n_channels =14 + (4 if self.use_diff_dem else 0) + (1 if self.use_mask else 0)# 
+            self.n_channels =14 + (4 if self.use_diff_dem else 0) + (1 if self.use_mask else 0) + (3 if self.use_feat else 0)# 
         else:
             self.n_channels = self.timestep*3  + self.predict_ahead + (4 if self.use_diff_dem else 0) #+ 1   #dem, rainfall*timestep, wd*timestep 
         self.n_classes = n_classes
         self.bilinear = bilinear
-        self.border_size = catchment_kwargs["border_size"]
+        self.border_size = border_size#catchment_kwargs["border_size"]
         self.args = args
 
         self.inc = DoubleConv(self.n_channels, 64)
