@@ -340,14 +340,14 @@ def predict_event(model, dataset, event_num, arch, start_ts=None, ar = True, T =
 
         inputs_ts, xout = create_inputs(dataset, x_p, y_p, xin, rainfall, mask, dem, diff_dem, feat_ex, target)
         (data, mask1) = inputs_ts
-        print(data.shape)
+#         print(data.shape)
         data = data.unsqueeze(dim=0)
         data = to_device_eval(data)
         y_pred = model(data)['y_pred'].squeeze().detach().cpu()
         y_true = xout.squeeze().detach().cpu()
 
-        plt.imshow(y_pred, cmap = 'Blues')
-        plt.show()
+#         plt.imshow(y_pred, cmap = 'Blues')
+#         plt.show()
 
 #         recons_pred_full[x_p:x_p+patch_dim, y_p:y_p + patch_dim] = y_pred
 #         recons_gt_full[x_p:x_p+patch_dim, y_p:y_p + patch_dim] = y_true
