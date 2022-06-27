@@ -343,7 +343,7 @@ if __name__ == '__main__':
     ## training files takes 2 random patches instead of 100 in the normal file. loc: /scratch2/flood_sim/data/709/one_alt/
 
     #### bayesian training parameters #########################################
-    parser.add_argument("--if_bayesian",default=False,type=bool,choices=[True,False],help="training using bayesian predictive uncertainty") 
+    parser.add_argument("--if_bayesian",default=True,type=bool,choices=[True,False],help="training using bayesian predictive uncertainty") 
     parser.add_argument('--num_models', type=int, default=5)
     parser.add_argument("--model_number",default="model1",type=str,help="ensemble model number training")
     parser.add_argument('--seed', type=int, default=27,help="model1: 19, model2: 27, model3: 37, model4: 45, model5: 73")
