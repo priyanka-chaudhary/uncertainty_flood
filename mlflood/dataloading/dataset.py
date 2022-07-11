@@ -34,6 +34,7 @@ def load_dataset(catchment_kwargs):
                                 use_diff_dem = catchment_kwargs["use_diff_dem"],
                                 num_patch = catchment_kwargs["num_patch"],
                                 predict_ahead = catchment_kwargs["predict_ahead"],
+                                use_feat = catchment_kwargs["use_feat"], 
                                 random_patches=True)
     
     valid_dataset = MyCatchment(PATH_GENERATED / Path(catchment_num+"-val.h5"), 
@@ -47,6 +48,7 @@ def load_dataset(catchment_kwargs):
                                 use_diff_dem = catchment_kwargs["use_diff_dem"],
                                 num_patch = catchment_kwargs["num_patch"],
                                 predict_ahead = catchment_kwargs["predict_ahead"],
+                                use_feat = catchment_kwargs["use_feat"], 
                                 random_patches=True)
     
     return train_dataset, valid_dataset
@@ -63,11 +65,43 @@ def load_test_dataset(catchment_kwargs):
                                 fix_indexes = catchment_kwargs["fix_indexes"],
                                 normalize_output = catchment_kwargs["normalize_output"],
                                 use_diff_dem = catchment_kwargs["use_diff_dem"],
+                                use_feat = catchment_kwargs["use_feat"], 
                                 num_patch = catchment_kwargs["num_patch"],
                                 predict_ahead = catchment_kwargs["predict_ahead"])
     return dataset
 
+def get_topo_index(catchment_num):
+    path_topo_index = PATH_GENERATED / Path(catchment_num+"_topo_index.npy")
+    topo_index=np.load(path_topo_index)
+    return torch.as_tensor(topo_index)
 
+def get_features(catchment_num):
+    path_slope = PATH_GENERATED / Path(catchment_num+"_slope.npy")
+    slope = np.load(path_slope)
+    slope = torch.unsqueeze(torch.as_tensor(slope), dim=0)
+
+    path_aspect = PATH_GENERATED / Path(catchment_num+"_aspect.npy")
+    aspect = np.load(path_aspect)
+    aspect = torch.unsqueeze(torch.as_tensor(aspect), dim=0)
+
+    path_topo_index = PATH_GENERATED / Path(catchment_num+"_topo_index.npy")
+    topo_index=np.load(path_topo_index)
+    topo =  torch.unsqueeze(torch.as_tensor(topo_index), dim=0)
+
+    path_curv = PATH_GENERATED / Path(catchment_num+"_curv.npy")
+    curv = np.load(path_curv)  
+    curv = torch.unsqueeze(torch.as_tensor(curv), dim=0)
+
+    path_curv2 = PATH_GENERATED / Path(catchment_num+"_curv_pr.npy")
+    curv2 = np.load(path_curv2)  
+    curv2 = torch.unsqueeze(torch.as_tensor(curv2), dim=0)
+
+    path_curv3 = PATH_GENERATED / Path(catchment_num+"_curv_pn.npy")
+    curv3 = np.load(path_curv3)  
+    curv3 = torch.unsqueeze(torch.as_tensor(curv3), dim=0)
+
+    #return torch.cat([topo])
+    return torch.cat([topo,slope,aspect,curv])
 
 def dataloader_args(train_dataset, valid_dataset, catchment_num = "toy", batch_size = 8):
     
@@ -110,14 +144,9 @@ def build_diff_dem(dem):
     dy2 = torch.unsqueeze(torch.diff(dem, append=torch.tensor([[-1]]*px), dim=1), 0)
     return torch.cat([dx1,dx2,dy1,dy2])
 
-def get_topo_index(catchment_num):
-    path_topo_index = PATH_GENERATED / Path(catchment_num+"_topo_index.npy")
-    topo_index=np.load(path_topo_index)
-    return torch.as_tensor(topo_index)
-
 class MyCatchment(torch.utils.data.Dataset):
     
-    def __init__(self,  h5file, c_num, tau=0.5, upsilon=0, timestep=1, sample_type="single", dim_patch=64, fix_indexes=False, border_size=0, normalize_output = False, use_diff_dem=True, num_patch = 10, predict_ahead = 0, ts_out = 0, random_patches=True):
+    def __init__(self,  h5file, c_num, tau=0.5, upsilon=0, timestep=1, sample_type="single", dim_patch=64, fix_indexes=False, border_size=0, normalize_output = False, use_diff_dem=True, num_patch = 10, predict_ahead = 0, ts_out = 0, random_patches=True, use_feat = True):
         '''
         Initialization
         '''
@@ -130,9 +159,10 @@ class MyCatchment(torch.utils.data.Dataset):
         self.do_pad = True
         self.normalize_output = normalize_output
         self.use_diff_dem = use_diff_dem
+        self.use_feat = use_feat
         self.predict_ahead = predict_ahead
         self.ts_out = ts_out
-        self.c_num = c_num
+        self.c_num = c_num # no _max here to remove
 
         print(f"Load file: {h5file}")
         self.h5file = h5py.File(h5file, "r")
@@ -141,11 +171,14 @@ class MyCatchment(torch.utils.data.Dataset):
         self.dem_mask = self.pad_borders(torch.tensor(self.h5file["mask"][()]).bool(), False)
         self.dem[self.dem_mask==False] = -1
 
-        #self.topo_index = get_topo_index('709')
+        #self.topo_index = get_topo_index(self.c_num)
         #self.topo = self.pad_borders(torch.tensor(self.topo_index).float(), -1)
+
+        temp = get_features(self.c_num)
+        self.feat = self.pad_borders(torch.tensor(temp).float(), -1)
         
         self.diff_dem = build_diff_dem(self.dem)
-        self.input_channels = 3 *timestep + (4 if use_diff_dem else 0) + self.predict_ahead# + 1 # 1 for topogrpahic feature
+        self.input_channels = 3 *timestep + (4 if use_diff_dem else 0) + self.predict_ahead + (4 if self.use_feat else 0)# + 1 # 1 for topogrpahic feature
         self.data_stats = {"input_channels": self.input_channels,
               "output_channels": 1}
         
@@ -273,34 +306,36 @@ class MyCatchment(torch.utils.data.Dataset):
         dem = self.dem
         diff_dem = self.diff_dem
         #topo = self.topo
+        feat_ex = self.feat
         if self.sample_type == "single":
 
             if self.fix_indexes:
                 x_p, y_p = self.inds[index_s]    # finds adjacent coordinates
             else:
                 x_p, y_p = self.find_patch(mask, xin, index_t)
-            xin, mask, dem, diff_dem, xout = self.crop_to_patch(x_p, y_p, xin, mask, dem, diff_dem, xout)
+            xin, mask, dem, diff_dem, feat_ex, xout = self.crop_to_patch(x_p, y_p, xin, mask, dem, diff_dem, feat_ex, xout)
 
         outputs = self.build_output(xout, xin, mask)
         
-        inputs = self.build_inputs(xin, self.rainfall_events[index_e][index_t:index_t+self.timestep+ self.predict_ahead], mask, dem, diff_dem)
+        inputs = self.build_inputs(xin, self.rainfall_events[index_e][index_t:index_t+self.timestep+ self.predict_ahead], mask, dem, diff_dem, feat_ex)
         
         return inputs, outputs   
     
-    def crop_to_patch(self, x_p, y_p, xin, mask, dem, diff_dem, xout=None):
+    def crop_to_patch(self, x_p, y_p, xin, mask, dem, diff_dem, feat_ex, xout=None):
         '''
         Crops a patch of xin, mask, dem, xout based on current coordinates x_p, y_p
         '''
 
         xin = xin[:, x_p:x_p+self.nx, y_p:y_p+self.ny]
         diff_dem = diff_dem[:, x_p:x_p+self.nx, y_p:y_p+self.ny]
+        feat_ex = feat_ex[:, x_p:x_p+self.nx, y_p:y_p+self.ny]
         mask = mask[x_p:x_p+self.nx, y_p:y_p+self.ny]
         dem = dem[x_p:x_p+self.nx, y_p:y_p+self.ny]
         #topo = topo[x_p:x_p+self.nx, y_p:y_p+self.ny]
         if xout is not None:
             xout = xout[x_p:x_p+self.nx, y_p:y_p+self.ny]
         
-        return xin, mask, dem, diff_dem, xout
+        return xin, mask, dem, diff_dem, feat_ex, xout
     
     def build_output(self, xout, xin, mask):
         '''
@@ -325,7 +360,7 @@ class MyCatchment(torch.utils.data.Dataset):
         
         return y
     
-    def build_inputs(self, xin, rainfall_events, mask, dem, diff_dem):
+    def build_inputs(self, xin, rainfall_events, mask, dem, diff_dem, feat_ex):
 
         '''
         Builds input channels for the model and returns (inputs, mask)
@@ -340,15 +375,18 @@ class MyCatchment(torch.utils.data.Dataset):
             rain_t[i, mask] = rainfall_events[i]     # creates channels for rainfall
         
         d = 4 if self.use_diff_dem else 0
+        f = 4 if self.use_feat else 0
         x = torch.zeros((self.input_channels, *dem.shape))
         x[0] = dem.clone()
         if self.use_diff_dem:
             x[1:5] = diff_dem
+        if self.use_feat:
+            x[1+d:1+d+f] = feat_ex 
         #x[1+d] = topo
-        x[1+d : self.timestep+1+d + tsh] = rain_t
-        x[self.timestep+1+d + tsh: 2*self.timestep+1+d+ tsh] = xin
+        x[1+d+f : self.timestep+1+d+f+tsh] = rain_t
+        x[self.timestep+1+d+f+tsh: 2*self.timestep+1+d+f+tsh] = xin
         if self.timestep>1:
-            x[2*self.timestep+1+d+ tsh:] = normalize(torch.diff(xin, axis=0))            
+            x[2*self.timestep+1+d+f+tsh:] = normalize(torch.diff(xin, axis=0))            
 
         mask = mask.unsqueeze(0).clone()
         
